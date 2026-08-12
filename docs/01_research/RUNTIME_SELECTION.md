@@ -32,7 +32,7 @@ Used for initial reconnaissance of available configuration surfaces.
 ### B. Natively-built `litert_lm_main` (used for actual measurement)
 
 Built from source via Bazel, targeting `android_arm64`, and deployed
-directly to the Pixel 7a via `adb push`. **This is the binary that
+directly to the Pixel 7 via `adb push`. **This is the binary that
 will be used for all Phase B measurements.**
 
 - Build command: `bazel build --config=android_arm64 //runtime/engine:litert_lm_main`
