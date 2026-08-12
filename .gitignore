@@ -1,0 +1,17 @@
+# Model file (.litertlm, multi-GB — never committed to Git)
+*.litertlm
+
+# Android/Bazel build artifacts
+bazel-*
+.gradle/
+*.apk
+local.properties
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
