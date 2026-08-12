@@ -15,3 +15,7 @@ venv/
 
 # OS
 .DS_Store
+
+
+# Build artifacts (compiled binaries, never committed)
+build-artifacts/
