@@ -29,13 +29,18 @@ Used for initial reconnaissance of available configuration surfaces.
 - Exposes `--cpu-thread-count`, `--backend [cpu|gpu|npu]`.
 - **Not used for actual on-device measurement** — informational only.
 
-### B. Natively-built `litert_lm_main` (used for actual measurement)
+### B. Natively-built `litert_lm_advanced_main` (used for actual measurement)
 
 Built from source via Bazel, targeting `android_arm64`, and deployed
-directly to the Pixel 7 via `adb push`. **This is the binary that
-will be used for all Phase B measurements.**
+directly to the Pixel 7 via `adb push`. **This is the binary used for
+all Phase B measurements** — superseding an earlier attempt with the
+simpler `litert_lm_main` demo binary, which does not implement
+generation-length control (see ISSUE_LOG.md #8). `litert_lm_advanced_main`
+implements `--benchmark`, `--benchmark_prefill_tokens`, and
+`--benchmark_decode_tokens`, required to enforce the project's fixed
+workload output-length constraint (§5).
 
-- Build command: `bazel build --config=android_arm64 //runtime/engine:litert_lm_main`
+Build command: `bazel build --config=android_arm64 //runtime/engine:litert_lm_advanced_main`
 - Build environment: WSL2 (Ubuntu 26.04 LTS), Bazel 7.6.1 (via
   Bazelisk), Android NDK r28b.
 - Build result verified: ELF 64-bit LSB pie executable, ARM aarch64,
@@ -62,6 +67,13 @@ will be used for all Phase B measurements.**
   CPU backend's implementation itself.
 - **Model path**: `--model_path` (local file path to `.litertlm`) or
   `--input_prompt` / `--input_prompt_file` for the prompt.
+
+Note: `--num_cpu_threads`, `--backend`, and `--enable_ynnpack` are
+declared in `shared_flags.cc`, shared by both `litert_lm_main` and
+`litert_lm_advanced_main` — findings about these flags remain valid
+after the binary switch. Only the length-control mechanism
+(`--max_output_tokens` / `--benchmark_*`) differs between the two.
+
 
 ## New finding: `--enable_ynnpack` flag (undocumented)
 
