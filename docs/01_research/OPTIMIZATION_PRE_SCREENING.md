@@ -14,7 +14,7 @@
 
 ### 1. i8mm / KleidiAI (Arm I8MM matrix-multiply extension)
 
-Rejected on hardware-availability grounds. The Pixel 7a's Tensor G2 CPU
+Rejected on hardware-availability grounds. The Pixel 7's Tensor G2 CPU
 cores (Cortex-X1, Cortex-A78, Cortex-A55) implement Armv8.2-A with
 extensions up to Armv8.4-A dot product. The I8MM extension requires
 Armv8.6-A, which none of these cores support. Enabling this path would

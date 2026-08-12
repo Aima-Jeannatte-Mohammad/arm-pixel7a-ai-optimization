@@ -3,8 +3,7 @@
 Status: in progress.
 
 Execution-level optimization of a fixed local AI inference workload on
-a Google Pixel 7a (Arm-based Tensor G2), studying CPU thread-count
-tuning and CPU backend (XNNPACK) configuration on LiteRT-LM.
+a Google Pixel 7 (Arm-based Tensor G2), studying CPU thread-count.
 
 The fixed workload: explaining English technical documentation in
 French, preserving established technical terminology rather than
