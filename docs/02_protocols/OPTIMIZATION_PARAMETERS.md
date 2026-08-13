@@ -190,3 +190,20 @@ the strict Phase B gate) — to be adjusted if the pilot run shows
 thermal status frequently failing to return to NONE/LIGHT within this
 window.
 
+## Frozen input file — canonical reference
+
+`phase_b_prompt.txt` (system prompt + doc_07, as pushed to
+`/data/local/tmp/`) is the exact, unchanging input for every Phase B
+run. Canonical reference:
+- Size: 2163 bytes
+- SHA256: 7edcb8370dfb3b31b90e148b579dabcc488da9eb61b53838a1c2703212e4e606
+
+This file's Prefill Turn token count (447, confirmed via a verified
+run) is the Phase B baseline reference -- it is not required to match
+Phase A's doc_07 prefill count (464), since Phase A's exact historical
+file could not be byte-verified retroactively. Phase B's internal
+consistency (same file across all configurations) is what matters for
+valid relative comparisons, not parity with a prior phase's number.
+Before every future measurement, verify `sha256sum` on-device matches
+the value above -- do not regenerate this file at any point during
+the campaign.
