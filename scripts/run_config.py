@@ -62,7 +62,6 @@ FIELDNAMES = [
 def adb_shell(cmd, timeout=60):
     """Run a single adb shell command, return stdout as string."""
     result = subprocess.run(
-        ["adb", "shell", cmd], capture_output=True, text=True, timeout=timeout, check=False
     )
     return result.stdout
 
