@@ -1,0 +1,14 @@
+Source: https://developer.android.com/agi/sys-trace/threads-scheduling
+
+CPU core affinity
+One factor that significantly affects the performance of your CPU workloads is how they are scheduled on the cores.
+
+Modern devices often use an architecture called heterogeneous computing, where the cores have different levels of performance:
+
+One or a few cores offer top peak performance, but consume more power. These are sometimes called "big" cores.
+Other cores have lower peak performance, but are more power-efficient. These are sometimes called "little" cores.
+Optionally: one or more cores offer a balance between performance and power. These are sometimes called "mid" cores.
+
+If you find that certain threads are being scheduled on CPUs that don't meet their needs for performance or power, consider manually setting the CPU affinity for those threads.
+
+By forcing affinities to big cores, you may unnecessarily increase battery drain and thermal load. For these reasons, it's generally best to avoid manually setting CPU affinities.
