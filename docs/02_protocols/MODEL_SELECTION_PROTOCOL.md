@@ -123,6 +123,23 @@ manual scoring alone (impractical at n=75 given evaluator bilingual
 availability). This limitation and mitigation are carried forward to
 LIMITATIONS.md.
 
+## Device state recording (Phase A runs)
+
+Phase A does not require the strict readiness gate used in Phase B
+(§38-43 of the master prompt) — Phase A's measured variable is output
+content/quality, not latency, and content is expected to be
+independent of thermal/battery state under (likely, though not
+formally confirmed -- see ISSUE_LOG.md #12) deterministic decoding.
+
+However, thermal status, battery level, and charging state are
+recorded (not gated) before each of the 75 runs, for two reasons:
+(1) to allow a post-hoc check for any correlation between device state
+and output anomalies, given the unresolved determinism uncertainty;
+(2) to identify and exclude, per §37, any run that fails or produces
+a truncated/corrupted result due to an extreme device state (e.g. app
+killed under critical battery), as an instrumentation failure rather
+than a model-quality signal.
+
 ## Retention criteria
 
 The model is retained if, across all 75 observations:
@@ -147,6 +164,22 @@ Small validation dataset (n=75). Report: individual scores, mean,
 median, score distribution, proportion meeting threshold, critical-error
 count and proportion. This is model-selection evidence, not
 population-level statistical validation.
+
+
+## Run-count reduction (from doc_03 onward)
+
+Determinism was empirically confirmed on doc_01 (5/5 identical runs)
+and doc_02 (5/5 identical runs) -- 10 total confirmations across two
+structurally different documents, under varying thermal status
+(NONE/LIGHT) and battery state, with no observed divergence. Per the
+reasoning in ISSUE_LOG.md #12 (the original rationale for 5 runs --
+averaging over sampling noise -- does not apply if generation is
+deterministic for fixed inputs), the run count is reduced from 5 to
+2 runs per document starting at doc_03. This reduction is a one-time,
+documented decision made before scoring doc_03 -- not a retroactive
+adjustment. If any future run on any document diverges from its
+sibling run, this reduction is void and 5-run scoring resumes for all
+subsequent documents, with the divergence investigated and logged.
 
 ## Next step
 
