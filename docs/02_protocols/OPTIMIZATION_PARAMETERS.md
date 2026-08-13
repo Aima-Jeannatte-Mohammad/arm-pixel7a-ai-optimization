@@ -115,24 +115,38 @@ replication (best configuration re-run in a separate session) is
 required before any configuration is reported as final — see
 MEASUREMENT_PROCEDURE.md.
 
+## Charging state — resolved
+
+Phase B measurements are taken with the device disconnected from USB
+power (wireless ADB), not while charging. Rationale: simultaneous
+charging and CPU-bound inference introduces an uncontrolled thermal
+confound (two independent heat sources) not present in normal
+standalone execution. This differs from Phase A, which ran while
+charging (a choice made for setup convenience, not deliberate control,
+per ISSUE_LOG.md).
+
+Battery floor raised from ≥20% to ≥50% specifically to limit
+within-campaign battery-level drift across the ~2.5-4h estimated
+campaign duration — configurations tested later in the campaign should
+not run under meaningfully different battery conditions than those
+tested first. If battery drops below 50% mid-campaign, pause and
+recharge before continuing; do not lower this threshold retroactively.
+
+"Charging state" is removed as a separate readiness-gate parameter —
+the gate becomes: thermal status (NONE/LIGHT) + battery ≥50%. Device
+is confirmed disconnected from USB power for the entire campaign, not
+checked per-run (it is a session-level condition, not a per-run one).
+
 ## Readiness gate thresholds
-
-Per the master prompt's resolved decision (§41), device temperature is
-measured exclusively via Android thermal status
-(`PowerManager.getCurrentThermalStatus()`), not raw °C.
-
-Thresholds, set from Phase A's actual observed device behavior (36
-runs, all thermal states logged in `MODEL_SELECTION_SCORING.xlsx`):
 
 | Parameter | Accepted range | Rationale |
 |---|---|---|
-| Thermal status | NONE or LIGHT only | Phase A never observed MODERATE or above across 36 runs under CPU-only inference; MODERATE+ is treated as a stop condition, not a tested state |
-| Battery level | ≥ 20% | Standard conservative floor; avoids confounding low-battery power-management behavior with configuration effects |
-| Charging state | Charging (plugged in) | Phase A ran exclusively while charging (confirmed in the scoring workbook's device-state columns); Phase B keeps this constant rather than introduce an untested variable |
+| Thermal status | NONE or LIGHT only | Phase A never observed MODERATE or above across 36 runs; MODERATE+ is treated as a stop condition, not a tested state |
+| Battery level | ≥ 50% | Raised from an initial 20% floor to limit within-campaign battery-level drift over the ~2.5-4h estimated campaign, given the device runs unplugged (see Charging state note above) |
 
-A run may begin only when all three parameters pass (per §38/§41's
-corrected three-parameter gate — device temperature and thermal status
-are the same signal, not two separate checks).
+A run may begin only when both parameters pass. Device disconnection
+from USB power is a session-level precondition confirmed once at
+campaign start, not re-checked per run.
 
 ## Stabilization criterion
 
@@ -175,3 +189,4 @@ logs do not include recovery-interval data, since Phase A did not use
 the strict Phase B gate) — to be adjusted if the pilot run shows
 thermal status frequently failing to return to NONE/LIGHT within this
 window.
+
