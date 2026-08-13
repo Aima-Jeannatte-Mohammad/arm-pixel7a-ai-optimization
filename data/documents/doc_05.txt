@@ -1,0 +1,10 @@
+Source: https://docs.kernel.org/scheduler/sched-design-CFS.html
+
+THE RBTREE
+CFS’s design is quite radical: it does not use the old data structures for the runqueues, but it uses a time-ordered rbtree to build a “timeline” of future task execution, and thus has no “array switch” artifacts (by which both the previous vanilla scheduler and RSDL/SD are affected).
+
+CFS also maintains the rq->cfs.min_vruntime value, which is a monotonic increasing value tracking the smallest vruntime among all tasks in the runqueue. The total amount of work done by the system is tracked using min_vruntime; that value is used to place newly activated entities on the left side of the tree as much as possible.
+
+The total number of running tasks in the runqueue is accounted through the rq->cfs.load value, which is the sum of the weights of the tasks queued on the runqueue.
+
+CFS maintains a time-ordered rbtree, where all runnable tasks are sorted by the p->se.vruntime key. CFS picks the “leftmost” task from this tree and sticks to it. As the system progresses forwards, the executed tasks are put into the tree more and more to the right --- slowly but surely giving a chance for every task to become the “leftmost task” and thus get on the CPU within a deterministic amount of time.
