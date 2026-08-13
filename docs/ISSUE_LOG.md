@@ -22,3 +22,4 @@ this is supplementary evidence of methodical process.
 
 Add new rows chronologically as issues arise during the remaining
 phases (model download, campaign execution, dashboard build, etc.).
+| 15 | Phase A measurement | `Failed to get decode profile summary: INVALID_ARGUMENT` warning appears on every run, since the very first inference test | Source-confirmed (`runtime/core/tasks.cc:760-766`): the warning fires when `executor.GetProfileSummary()` fails, called only AFTER decode timing (`TimeDecodeTurnEnd()`) has already completed. It only affects an optional profiling metadata field (`benchmark_info->SetProfileSummary()`); the code path continues normally with no error propagation | Confirmed non-blocking by source inspection, not just by observed behavior. No further action needed -- documented as a known, harmless warning tied to an unused optional profiling subsystem |
