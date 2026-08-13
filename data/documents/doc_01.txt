@@ -1,0 +1,19 @@
+Source: https://armkeil.blob.core.windows.net/developer/Files/pdf/white-paper/big-little-technology-the-future-of-mobile.pdf
+
+Global Task Scheduling
+In Global Task Scheduling, the OS task scheduler understands the differences in compute capacity
+between the big and LITTLE processors in the system. The scheduler tracks the compute requirements of
+each individual thread and the current load state of each processor, and uses this information to
+determine the optimal balance of threads between big and LITTLE processors. This approach has a
+number of advantages over CPU Migration:
+1. The system can have different numbers of big and LITTLE cores.
+2. Any number of cores may be active at any one time. When peak performance is required the
+system can deploy all cores. With CPU Migration only half of the cores may be active at any one
+time.
+3. It is possible to isolate the big cluster for the exclusive use of intensive threads, whilst light
+threads run on the LITTLE cluster . With CPU Migration, all the threads in a processor transfer
+together. This allows heavy compute tasks to complete faster, as there are no additional
+background threads.
+4. It is possible to target interrupts individually to big or LITTLE cores. The CPU Migration model
+assumes all context, including interrupt targetting, migrates between big and LITTLE processors.
+ 

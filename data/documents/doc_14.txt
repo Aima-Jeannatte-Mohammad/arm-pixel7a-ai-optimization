@@ -1,0 +1,3 @@
+Source: https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html
+
+A block of threads is referred to as a thread block. Thread blocks are organized into a grid. The CUDA programming model enables arbitrarily large grids to run on GPUs of any size, whether it has only one SM or thousands of SMs. To achieve this, the CUDA programming model requires that there be no data dependencies between threads in different thread blocks. That is, a thread should not depend on results from or synchronize with a thread in a different thread block of the same grid. All the threads within a thread block run on the same SM at the same time. Different thread blocks within the grid are scheduled among the available SMs and may be executed in any order.

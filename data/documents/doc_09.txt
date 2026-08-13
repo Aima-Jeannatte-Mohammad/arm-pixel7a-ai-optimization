@@ -1,0 +1,3 @@
+Source: https://git-scm.com/docs/gitdatamodel
+
+A blob object contains a file's contents. When you make a commit, Git stores the full contents of each file that you changed as a blob. A tree is how Git represents a directory. It can contain files or other trees, which are subdirectories. It lists, for each item in the tree, the object ID with the contents of the file, directory, or gitlink. Like all other objects, commits can never be changed after they're created. For example, "amending" a commit with git commit --amend creates a new commit with the same parent. Git does not store the diff for a commit: when you ask Git to show the commit, it calculates the diff from its parent on the fly.

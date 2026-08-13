@@ -1,0 +1,3 @@
+Source: https://webassembly.github.io/spec/core/intro/introduction.html
+
+WebAssembly (abbreviated Wasm) is a safe, portable, low-level code format designed for efficient execution and compact representation. Its main goal is to enable high performance applications on the Web, but it does not make any Web-specific assumptions or provide Web-specific features, so it can be employed in other environments as well. At its core, WebAssembly is a virtual instruction set architecture (virtual ISA). WebAssembly executes with near native code performance, taking advantage of capabilities common to all contemporary hardware. Code is validated and executes in a memory-safe, sandboxed environment preventing data corruption or security breaches.

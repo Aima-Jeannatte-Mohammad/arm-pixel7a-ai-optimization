@@ -1,0 +1,9 @@
+Source: https://developer.android.com/games/optimize/adpf/thermal
+
+The potential performance of your app is limited by the thermal state of the device, which can vary based on characteristics such as weather, recent usage, and the device's thermal design. Devices can only maintain a high level of performance for a limited amount of time before being thermally throttled. A key goal of your implementation should be to achieve performance goals without exceeding thermal limitations.
+
+Game engines usually have runtime performance parameters that can adjust the workload the engine puts on the device. For example, these parameters can set the number of worker threads, worker-thread affinity for big and small cores, GPU fidelity options, and framebuffer resolutions.
+
+Once the device overheats, the workload must drop below the sustainable performance level in order to dissipate heat. After the thermal headroom decreases to safer levels, the game can increase the quality settings again.
+
+You can monitor the thermal state of the device by polling the getThermalHeadroom method. This method predicts how long the device can maintain the current performance level without overheating. If the time is less than the amount needed to run the workload, then your game should decrease the workload to a sustainable level. For example, the game can shift to smaller cores, reduce the frame rate, or lower fidelity.

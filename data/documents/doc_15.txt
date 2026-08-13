@@ -1,0 +1,3 @@
+Source: https://docs.cloud.google.com/dns/docs/dns-overview
+
+A recursive resolver is the server that sends a query to the authoritative or non-authoritative server for resolution. A recursive resolver is so-called because it performs each query for a given name and returns the final result. Each DNS client queries a name server. A recursive resolver queries other name servers, all the way up to a top-level name server, if necessary. The NS record for a zone on an upper-level name server directs the resolver down to another name server, eventually reaching either a name server that cached the zone or the authoritative server for the zone.

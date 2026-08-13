@@ -1,0 +1,7 @@
+Source: https://bazel.build/docs/sandboxing
+
+
+Sandboxing is a permission restricting strategy that isolates processes from each other or from resources in a system. For Bazel, this means restricting file system access.
+Bazel’s file system sandbox runs processes in a working directory that only contains known inputs, such that compilers and other tools don’t see source files they should not access, unless they know the absolute paths to them.
+Sandboxing doesn’t hide the host environment in any way. Processes can freely access all files on the file system. However, on platforms that support user namespaces, processes can’t modify any files outside their working directory. This ensures that the build graph doesn’t have hidden dependencies that could affect the reproducibility of the build.
+More specifically, Bazel constructs an execroot/ directory for each action, which acts as the action’s work directory at execution time. execroot/ contains all input files to the action and serves as the container for any generated outputs. Bazel then uses an operating-system-provided technique, containers on Linux and sandbox-exec on macOS, to constrain the action within execroot/.
