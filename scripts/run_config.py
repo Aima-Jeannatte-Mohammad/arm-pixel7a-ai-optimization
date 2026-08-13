@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""
+scripts/run_config.py
+
+Runs N measurement runs of a single Phase B configuration (baseline
+auto, or a specific --num_cpu_threads value) against the frozen
+phase_b_prompt.txt workload on the connected Android device, enforcing
+the readiness gate (thermal status + battery) before every run, and
+logging full structured metrics to a CSV per MEASUREMENT_PROCEDURE.md
+and OPTIMIZATION_PARAMETERS.md.
+
+Requires: `adb` on PATH, device connected (wireless ADB, USB
+disconnected per OPTIMIZATION_PARAMETERS.md), the binary/model/prompt
+files already pushed to /data/local/tmp/ (see RUNTIME_SELECTION.md).
+
+Usage examples:
+    python scripts/run_config.py --config baseline --n-runs 5 --run-type warmup --output data/raw/baseline.csv
+    python scripts/run_config.py --config baseline --n-runs 30 --run-type valid --output data/raw/baseline.csv
+    python scripts/run_config.py --config threads_4 --threads 4 --n-runs 30 --run-type valid --output data/raw/threads_4.csv
+
+CPU utilization and peak memory are collected via /proc/<PID>/stat and
+/proc/<PID>/status, polled once per second over adb shell. This is
+best-effort given wireless-adb round-trip latency (each poll is a
+separate adb shell call) -- it is diagnostic (per master prompt §46),
+not a high-precision profiler. CPU utilization is reported as raw
+percent of one core (may exceed 100% when multiple threads are
+active, up to ~800% on this 8-core device) -- this is the standard
+"top"-style convention, not normalized per core.
+"""
+
+import argparse
+import csv
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BINARY_DIR = "/data/local/tmp"
+MODEL = "/data/local/tmp/gemma-4-E2B-it.litertlm"
+PROMPT_FILE = "/data/local/tmp/phase_b_prompt.txt"
+REMOTE_OUTPUT = "/data/local/tmp/run_output.log"
+
+THERMAL_OK = {"0", "1"}  # NONE, LIGHT (per OPTIMIZATION_PARAMETERS.md)
+BATTERY_MIN = 50
+READINESS_POLL_INTERVAL_S = 30
+READINESS_MAX_WAIT_S = 1800
+PROC_POLL_INTERVAL_S = 1.0
+INTER_RUN_DELAY_S = 5
+
+FIELDNAMES = [
+    "timestamp", "config", "threads", "run_type",
+    "thermal_status_start", "battery_pct_start", "thermal_status_end",
+    "end_to_end_latency_s", "init_total_ms", "time_to_first_token_s",
+    "prefill_tokens", "prefill_speed_tok_s",
+    "decode_tokens", "decode_speed_tok_s",
+    "peak_rss_kb", "cpu_pct",
+    "validity", "exclusion_reason",
+]
+
+
+def adb_shell(cmd, timeout=60):
+    """Run a single adb shell command, return stdout as string."""
+    result = subprocess.run(
+        ["adb", "shell", cmd], capture_output=True, text=True, timeout=timeout
+    )
+    return result.stdout
+
+
+def get_thermal_status():
+    out = adb_shell("dumpsys thermalservice")
+    m = re.search(r"Thermal Status:\s*(\d+)", out)
+    return m.group(1) if m else None
+
+
+def get_battery_level():
+    out = adb_shell("dumpsys battery")
+    m = re.search(r"level:\s*(\d+)", out)
+    return int(m.group(1)) if m else None
+
+
+def get_clk_tck():
+    out = adb_shell("getconf CLK_TCK 2>/dev/null").strip()
+    try:
+        return int(out)
+    except ValueError:
+        return 100  # standard Linux/Android USER_HZ default
+
+
+def readiness_gate():
+    """Block until thermal status and battery both pass. Returns
+    (thermal_status, battery_pct) once GREEN LIGHT. Raises TimeoutError
+    if the gate does not pass within READINESS_MAX_WAIT_S."""
+    waited = 0
+    while True:
+        thermal = get_thermal_status()
+        battery = get_battery_level()
+        ok_thermal = thermal in THERMAL_OK
+        ok_battery = battery is not None and battery >= BATTERY_MIN
+        if ok_thermal and ok_battery:
+            return thermal, battery
+        print(
+            f"  [readiness] NOT READY (thermal={thermal}, battery={battery}%) "
+            f"-- waiting {READINESS_POLL_INTERVAL_S}s...",
+            file=sys.stderr,
+        )
+        time.sleep(READINESS_POLL_INTERVAL_S)
+        waited += READINESS_POLL_INTERVAL_S
+        if waited >= READINESS_MAX_WAIT_S:
+            raise TimeoutError("Readiness gate did not pass within max wait time")
+
+
+def poll_proc(pid):
+    """Single combined adb call: checks if PID is alive, and if so
+    returns (VmHWM_kb, utime_ticks, stime_ticks). Returns None if the
+    process has already exited."""
+    cmd = (
+        f'if [ -d /proc/{pid} ]; then '
+        f'cat /proc/{pid}/status 2>/dev/null | grep VmHWM; '
+        f'echo ---; '
+        f'cat /proc/{pid}/stat 2>/dev/null; '
+        f'else echo GONE; fi'
+    )
+    out = adb_shell(cmd)
+    if out.strip() == "GONE" or "---" not in out:
+        return None
+    vmhwm_part, stat_part = out.split("---", 1)
+    vmhwm_kb = None
+    m = re.search(r"VmHWM:\s*(\d+)\s*kB", vmhwm_part)
+    if m:
+        vmhwm_kb = int(m.group(1))
+    utime = stime = None
+    stat_line = stat_part.strip()
+    if stat_line:
+        try:
+            after_comm = stat_line.rsplit(")", 1)[1].split()
+            utime = int(after_comm[11])  # field 14 of /proc/pid/stat
+            stime = int(after_comm[12])  # field 15
+        except (IndexError, ValueError):
+            pass
+    return vmhwm_kb, utime, stime
+
+
+def parse_benchmark_info(text):
+    """Extract structured fields from the BenchmarkInfo block in the
+    binary's stdout/stderr log."""
+    def find_float(pattern):
+        m = re.search(pattern, text)
+        return float(m.group(1)) if m else None
+
+    def find_int(pattern):
+        m = re.search(pattern, text)
+        return int(m.group(1)) if m else None
+
+    return {
+        "init_total_ms": find_float(r"Init Total:\s*([\d.]+)\s*ms"),
+        "time_to_first_token_s": find_float(r"Time to first token:\s*([\d.]+)\s*s"),
+        "prefill_tokens": find_int(r"Prefill Turn 1: Processed (\d+) tokens"),
+        "prefill_speed_tok_s": find_float(r"Prefill Speed:\s*([\d.]+)\s*tokens/sec"),
+        "decode_tokens": find_int(r"Decode Turn 1: Processed (\d+) tokens"),
+        "decode_speed_tok_s": find_float(r"Decode Speed:\s*([\d.]+)\s*tokens/sec"),
+    }
+
+
+def run_one(threads, tick_rate):
+    """Launch the binary in the background on-device, poll it until
+    completion, and return (metrics_dict, raw_log_text)."""
+    threads_flag = f"--num_cpu_threads={threads} " if threads is not None else ""
+    # `exec` replaces the backgrounded shell's own process image with the
+    # binary, so `$!` captures the real litert_lm_advanced_main PID
+    # directly -- without it, `$!` captures an intermediate `sh` wrapper
+    # PID that may exit before the binary does, breaking /proc polling.
+    # Confirmed empirically on-device: `ps -A | grep litert` showed the
+    # binary's own PID only once `exec` was added to the launch command.
+    launch_cmd = (
+        f"cd {BINARY_DIR} && LD_LIBRARY_PATH={BINARY_DIR} exec "
+        f"./litert_lm_advanced_main --backend=cpu --max_output_tokens=400 "
+        f"--benchmark=true {threads_flag}--model_path={MODEL} "
+        f"--input_prompt_file={PROMPT_FILE} "
+        f"> {REMOTE_OUTPUT} 2>&1 & echo $!"
+    )
+
+    wall_start = time.time()
+    pid_out = adb_shell(launch_cmd).strip()
+    pid = pid_out.splitlines()[-1].strip() if pid_out else ""
+    if not pid.isdigit():
+        raise RuntimeError(f"Failed to obtain PID from device launch, got: {pid_out!r}")
+
+    cpu_start = None
+    last_cpu = None
+    peak_rss_kb = 0
+    last_poll_time = wall_start
+
+    while True:
+        reading = poll_proc(pid)
+        now = time.time()
+        if reading is None:
+            break  # process has exited
+        vmhwm_kb, utime, stime = reading
+        if vmhwm_kb:
+            peak_rss_kb = max(peak_rss_kb, vmhwm_kb)
+        if utime is not None and stime is not None:
+            if cpu_start is None:
+                cpu_start = (utime, stime)
+            last_cpu = (utime, stime)
+            last_poll_time = now
+        time.sleep(PROC_POLL_INTERVAL_S)
+
+    wall_end = time.time()
+    end_to_end_s = wall_end - wall_start
+
+    cpu_pct = None
+    if cpu_start is not None and last_cpu is not None and last_poll_time > wall_start:
+        delta_ticks = (last_cpu[0] - cpu_start[0]) + (last_cpu[1] - cpu_start[1])
+        delta_cpu_s = delta_ticks / tick_rate
+        delta_wall_s = last_poll_time - wall_start
+        if delta_wall_s > 0:
+            cpu_pct = round(100.0 * delta_cpu_s / delta_wall_s, 1)
+
+    thermal_end = get_thermal_status()
+    log_text = adb_shell(f"cat {REMOTE_OUTPUT}")
+
+    metrics = parse_benchmark_info(log_text)
+    metrics.update({
+        "end_to_end_latency_s": round(end_to_end_s, 3),
+        "peak_rss_kb": peak_rss_kb or None,
+        "cpu_pct": cpu_pct,
+        "thermal_status_end": thermal_end,
+    })
+    return metrics, log_text
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--config", required=True,
+                         help="Configuration name, e.g. baseline, threads_4")
+    parser.add_argument("--threads", type=int, default=None,
+                         help="--num_cpu_threads value; omit for baseline/auto")
+    parser.add_argument("--n-runs", type=int, required=True,
+                         help="Number of runs to perform in this invocation")
+    parser.add_argument("--output", required=True,
+                         help="CSV path to append rows to (created with header if new)")
+    parser.add_argument("--run-type", default="valid", choices=["warmup", "valid"],
+                         help="Tag for this batch (warmup rows are excluded from stats)")
+    args = parser.parse_args()
+
+    tick_rate = get_clk_tck()
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not output_path.exists()
+
+    with open(output_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        if write_header:
+            writer.writeheader()
+
+        for i in range(1, args.n_runs + 1):
+            print(f"\n=== {args.config} | run {i}/{args.n_runs} ({args.run_type}) ===")
+            thermal_start, battery_start = readiness_gate()
+            print(f"  [readiness] GREEN LIGHT (thermal={thermal_start}, battery={battery_start}%)")
+
+            validity = "valid"
+            exclusion_reason = ""
+            try:
+                metrics, _log_text = run_one(args.threads, tick_rate)
+                if metrics.get("decode_tokens") is None:
+                    validity = "invalid"
+                    exclusion_reason = "failed_to_parse_benchmark_info"
+            except Exception as exc:  # noqa: BLE001 -- log and continue campaign
+                metrics = {}
+                validity = "invalid"
+                exclusion_reason = f"exception: {exc}"
+
+            row = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "config": args.config,
+                "threads": args.threads if args.threads is not None else "auto",
+                "run_type": args.run_type,
+                "thermal_status_start": thermal_start,
+                "battery_pct_start": battery_start,
+                "validity": validity,
+                "exclusion_reason": exclusion_reason,
+                **metrics,
+            }
+            writer.writerow(row)
+            f.flush()
+
+            print(
+                f"  latency={row.get('end_to_end_latency_s')}s  "
+                f"decode={row.get('decode_speed_tok_s')} tok/s  "
+                f"peak_rss={row.get('peak_rss_kb')} kB  "
+                f"cpu={row.get('cpu_pct')}%  "
+                f"validity={validity}"
+            )
+
+            time.sleep(INTER_RUN_DELAY_S)
+
+    print(f"\nDone. {args.n_runs} run(s) appended to {output_path}")
+
+
+if __name__ == "__main__":
+    main()
