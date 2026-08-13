@@ -97,11 +97,31 @@ Each output scored on, using `data/model_selection/MODEL_SELECTION_SCORING.xlsx`
 
 Scale: 1-5 per criterion 1-4 (see the workbook's Instructions sheet
 for the exact rubric). Critical error definition: an error that
-inverts or seriously distorts meaning (e.g. a negation dropped, a
-causal relationship reversed, or a relationship invented that is not
-present in the source text — see ISSUE_LOG.md #14 for a concrete
-example of this last failure mode, corrected in the frozen prompt
-above).
+inverts or seriously distorts meaning.
+
+**Scoring process (two-step, human-validated)**:
+
+1. For each of the 75 outputs, Claude (Anthropic) proposes scores for
+   all 5 criteria, applying the rubric line-by-line against the source
+   document -- verifying fidelity, checking for omissions or invented
+   content, and justifying each score against specific textual
+   evidence rather than holistic impression (same method used to
+   validate doc_01, see ISSUE_LOG.md).
+2. The project author reviews and validates (or corrects) each
+   proposed score before it is recorded in
+   MODEL_SELECTION_SCORING.xlsx. The author is the final decision-maker
+   on every one of the 75 scores -- Claude's proposal is a documented
+   starting point, not the recorded value by default.
+
+**Documented rationale**: this two-step process was adopted because
+Claude also authored the frozen system prompt (see ISSUE_LOG.md
+#8-14), and is therefore not fully independent of the protocol being
+evaluated -- a risk of favorable bias toward outputs produced by a
+prompt it designed. Human validation of every score is the control for
+this risk, rather than relying on either purely automated scoring or
+manual scoring alone (impractical at n=75 given evaluator bilingual
+availability). This limitation and mitigation are carried forward to
+LIMITATIONS.md.
 
 ## Retention criteria
 
