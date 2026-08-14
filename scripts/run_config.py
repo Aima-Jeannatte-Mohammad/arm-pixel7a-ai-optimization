@@ -20,7 +20,7 @@ Usage examples:
 CPU utilization and peak memory are collected via /proc/<PID>/stat and
 /proc/<PID>/status, polled once per second over adb shell. This is
 best-effort given wireless-adb round-trip latency (each poll is a
-separate adb shell call) -- it is diagnostic (per master prompt §46),
+separate adb shell call) -- it is diagnostic,
 not a high-precision profiler. CPU utilization is reported as raw
 percent of one core (may exceed 100% when multiple threads are
 active, up to ~800% on this 8-core device) -- this is the standard
