@@ -1,0 +1,11 @@
+timestamp,config,threads,run_type,thermal_status_start,battery_pct_start,thermal_status_end,end_to_end_latency_s,init_total_ms,time_to_first_token_s,prefill_tokens,prefill_speed_tok_s,decode_tokens,decode_speed_tok_s,peak_rss_kb,cpu_pct,validity,exclusion_reason
+2026-08-14T22:19:09,threads_4_replication,4,valid,0,63,0,19.507,4487.77,2.76,447,166.01,163,15.44,2187716,292.2,valid,
+2026-08-14T22:19:34,threads_4_replication,4,valid,0,63,0,19.275,4419.05,2.9,447,157.49,163,15.02,2180524,291.3,valid,
+2026-08-14T22:20:00,threads_4_replication,4,valid,0,62,1,19.92,4531.28,2.9,447,157.67,163,14.56,2183484,301.5,valid,
+2026-08-14T22:20:26,threads_4_replication,4,valid,1,61,1,19.938,4730.94,2.91,447,157.15,163,14.41,2180280,297.7,valid,
+2026-08-14T22:20:53,threads_4_replication,4,valid,1,61,1,20.471,5154.29,2.91,447,157.41,163,14.21,2181944,294.1,valid,
+2026-08-14T22:21:20,threads_4_replication,4,valid,1,61,1,20.894,5442.85,2.89,447,158.75,163,14.26,2185512,291.2,valid,
+2026-08-14T22:21:49,threads_4_replication,4,valid,1,60,1,22.981,6327.97,3.2,447,143.04,163,13.89,2191416,285.0,valid,
+2026-08-14T22:22:21,threads_4_replication,4,valid,1,60,1,25.359,6744.12,3.83,447,119.09,163,13.61,2187992,269.1,valid,
+2026-08-14T22:22:52,threads_4_replication,4,valid,1,60,1,25.483,6801.45,3.72,447,122.84,163,12.24,2186412,285.9,valid,
+2026-08-14T22:23:26,threads_4_replication,4,valid,1,59,1,27.238,7807.91,3.89,447,117.28,163,12.02,2190276,277.8,valid,
