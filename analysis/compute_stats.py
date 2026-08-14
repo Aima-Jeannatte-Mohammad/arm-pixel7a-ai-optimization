@@ -303,9 +303,11 @@ def results_table_html(stats, order, leader_cfg, ref_label="speedup"):
     rows_html = "<tr>" + "".join(f"<th>{c}</th>" for c in cols) + "</tr>"
     for cfg in order:
         s = stats[cfg]
-        style = "font-weight:700;color:#3fb950;" if cfg == leader_cfg else ""
+        # Emit the attribute only for the leader row -- a bare style="" is an
+        # empty CSS ruleset and trips HTML/CSS validators.
+        row_attr = ' class="leader-row"' if cfg == leader_cfg else ""
         rows_html += (
-            f'<tr style="{style}"><td>{cfg}</td><td>{s.get("thread_count", "-") or "auto"}</td>'
+            f'<tr{row_attr}><td>{cfg}</td><td>{s.get("thread_count", "-") or "auto"}</td>'
             f'<td>{s["n"]}</td><td>{s["median_latency_s"]}</td><td>{s["mean_latency_s"]}</td>'
             f'<td>{s["sd_latency_s"]}</td><td>{s["min_latency_s"]}</td><td>{s["max_latency_s"]}</td>'
             f'<td>{s["speedup_vs_ref"]}x</td><td>{s["latency_reduction_pct"]}</td>'
@@ -422,6 +424,7 @@ disabled.</p>
   th, td {{ padding: 7px 8px; text-align: right; border-bottom: 1px solid #30363d; }}
   th:first-child, td:first-child {{ text-align: left; }}
   th {{ color: #8b949e; font-weight: 600; }}
+  tr.leader-row td {{ font-weight: 700; color: #3fb950; }}
   .chart-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 16px 0; }}
   .chart-box {{ position: relative; height: 280px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px; }}
   ul.commentary li {{ margin: 10px 0; line-height: 1.55; font-size: 0.92rem; }}
