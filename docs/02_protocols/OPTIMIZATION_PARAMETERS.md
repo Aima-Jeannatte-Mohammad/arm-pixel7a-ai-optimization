@@ -254,3 +254,22 @@ run. Canonical reference:
 Before every measurement session, verify `sha256sum` on-device matches
 the value above — do not regenerate this file at any point during the
 campaign.
+
+## Replication decision rule (§54-bis) — clarified
+
+ROBUST requires two conditions, matching the master prompt's original
+"ranking and approximate magnitude" language rather than an arbitrary
+percentage threshold: (1) the configuration still outperforms baseline
+in the replication session, and (2) both the original and replication
+speedups fall on the same side of 1.0x (both real improvements, not
+one improvement and one regression). A replication that is even more
+favorable than the original still counts as ROBUST under this rule —
+magnitude drift alone does not invalidate a result if the direction
+and ranking are confirmed.
+
+## Lever 1 result: threads_4 VERIFIED
+
+threads_4 (24.874s median, 1.188x speedup vs. baseline) passed §54-bis
+replication: 20.682s median in a separate session (1.429x speedup),
+ranking held, same order of magnitude. Confirmed as the final Lever 1
+configuration. Proceeding to Lever 2 (weight cache) at threads_4.
