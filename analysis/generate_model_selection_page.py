@@ -54,27 +54,27 @@ AGGREGATE = {
 
 PATTERNS = [
     ("Opening-sentence translation failure",
-     "On 5 of 15 documents (doc_04, doc_06, doc_08, doc_09, doc_12), the model's "
-     "first line reproduced the source's opening sentence in English rather than "
-     "translating it, despite an explicit prompt instruction. On 2 of these "
-     "(doc_08, doc_09), the failure extended to several non-jargon noun phrases "
-     "throughout the response."),
+     ("On 5 of 15 documents (doc_04, doc_06, doc_08, doc_09, doc_12), the model's "
+      "first line reproduced the source's opening sentence in English rather than "
+      "translating it, despite an explicit prompt instruction. On 2 of these "
+      "(doc_08, doc_09), the failure extended to several non-jargon noun phrases "
+      "throughout the response.")),
     ("Isolated non-conformant arrow notation",
-     "On doc_13, the model used LaTeX notation ($\\rightarrow$) instead of the "
-     "plain arrow character specified in the prompt, consistently across both runs."),
+     ("On doc_13, the model used LaTeX notation ($\\rightarrow$) instead of the "
+      "plain arrow character specified in the prompt, consistently across both runs.")),
     ("Isolated single-chain structure",
-     "On doc_14, the response was one continuous chain of 8 arrows rather than "
-     "separated, line-by-line relationships seen on every other document, "
-     "reducing readability."),
+     ("On doc_14, the response was one continuous chain of 8 arrows rather than "
+      "separated, line-by-line relationships seen on every other document, "
+      "reducing readability.")),
     ("No inventions observed",
-     "Across all 36 observations, no run introduced a relationship, transition, "
-     "or fact absent from the source. Incomplete content was always an omission, "
-     "never a fabrication."),
+     ("Across all 36 observations, no run introduced a relationship, transition, "
+      "or fact absent from the source. Incomplete content was always an omission, "
+      "never a fabrication.")),
     ("Numerical/identifier preservation was reliable",
-     "Technical identifiers requiring exact preservation "
-     "(rq->cfs.min_vruntime, cwnd, ssthresh, execroot/, vkEndCommandBuffer, "
-     "VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT) were reproduced correctly "
-     "in every document where they appeared."),
+     ("Technical identifiers requiring exact preservation "
+      "(rq->cfs.min_vruntime, cwnd, ssthresh, execroot/, vkEndCommandBuffer, "
+      "VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT) were reproduced correctly "
+      "in every document where they appeared.")),
 ]
 
 NAV_HTML = """

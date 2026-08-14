@@ -162,7 +162,8 @@ def main():
             gap_s, gap_sd = signal_check(lever1_leader, s)
             s["gap_vs_lever1_leader_s"] = gap_s
             s["gap_in_lever1_leader_sds"] = gap_sd
-        lever2_leader_cfg, lever2_leader = min(lever2_stats.items(), key=lambda kv: kv[1]["median_latency_s"])
+        # The Lever 2 leader is derived where it is needed, in
+        # build_lever2_commentary() -- not carried in lever2_section.
         lever2_section = {
             "stats": lever2_stats,
             "order": list(lever2_stats.keys()),
