@@ -1,54 +1,56 @@
 # Model Selection Protocol
 
-## Objective
+> **Scope**: the Phase A design — what was tested, how it was scored,
+> and what would have caused rejection. This is a feasibility gate for
+> the workload model, not an optimization phase. Outcome is reported in
+> ../03_experiments_results/MODEL_SELECTION_RESULTS.md, not here.
 
-Determine whether a candidate Gemma-family model is suitable as the
-fixed workload model for the execution-optimization study (Phase B).
-This is a feasibility gate, not an optimization phase.
+Once this protocol completes, the model, prompt and workload are
+**frozen**: Phase B varies execution parameters only, never the prompt.
 
 ## Candidate model
 
-`litert-community/gemma-4-E2B-it.litertlm`
-Format: `.litertlm` (generic CPU/XNNPACK variant, not SoC-targeted),
-per ../01_research/RUNTIME_SELECTION.md.
-Size: 2.59 GB.
-SHA256: `181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c`.
+```
+litert-community/gemma-4-E2B-it.litertlm
+Format: .litertlm (generic CPU/XNNPACK variant, not SoC-targeted)
+Size:   2.59 GB
+SHA256: 181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c
 Source: https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
+```
 
 Rationale: most-downloaded, most recent generation (Gemma 4) generic
-CPU-path model in the LiteRT Community catalog at time of selection;
-"E2B" (lightweight) variant chosen over larger variants (4B/12B/26B/31B)
-to fit within the Pixel 7's ~2 GB available RAM headroom (see
-../02_protocols/DEVICE_CHARACTERIZATION.md). Translation-specialized
-models (TranslateGemma family) were considered and rejected: the
-workload requires concept explanation with terminology preservation,
-not literal translation (see Workload section below), which a
-translation-tuned model would work against.
+CPU-path model in the LiteRT Community catalog at time of selection. The
+lightweight **E2B** variant was chosen over 4B/12B/26B/31B to fit the
+Pixel 7's ~2 GB available RAM headroom (see DEVICE_CHARACTERIZATION.md).
 
-## Measurement binary
+Translation-specialized models (TranslateGemma family) were considered
+and rejected: the workload requires concept explanation with terminology
+*preservation*, not literal translation — a translation-tuned model would
+work against it.
 
-`litert_lm_advanced_main`, built from source via Bazel
-(`android_arm64` config). See ../01_research/RUNTIME_SELECTION.md for
-the full build/deployment record and the binary-selection history
-(an earlier `litert_lm_main` build was abandoned — it did not support
-output-length control).
+Measurement binary: `litert_lm_advanced_main`, built from source. See
+../01_research/RUNTIME_SELECTION.md for the build record and why the
+simpler `litert_lm_main` was abandoned.
 
-## Workload (frozen)
+## Frozen workload
 
-- Task: English technical documentation -> compact French schema
-  explanation using arrows (→) to represent cause-and-effect
-  relationships between concepts, not flowing prose. Established
-  technical terminology preserved in English where conventionally
-  used. Complex relationships get a maximum of 1-2 short French
-  clarifying sentences. Response opens with a literal French
-  translation of the source document's opening/title sentence.
-- Context: ~350-560 tokens observed (source document + system prompt
-  combined) across validation tests.
-- Output constraint: max 400 tokens (`--max_output_tokens=400`).
-  Observed usage across validation tests: 153-311 tokens on
-  successful formats — comfortable margin under the ceiling.
-- System prompt (frozen, exact text):
+- **Task**: English technical documentation → compact French schema
+  using arrows (→) for cause-and-effect relationships between concepts,
+  not flowing prose. Established technical terminology preserved in
+  English where conventionally used. Complex relationships get at most
+  1-2 short French clarifying sentences. The response opens with a
+  literal French translation of the source's opening/title sentence.
+- **Context length observed**: ~350-560 tokens (source + system prompt).
+- **Output constraint**: `--max_output_tokens=400`. Observed usage on
+  successful formats: 153-311 tokens — comfortable margin.
+- **Generation settings**: `--backend=cpu --benchmark=true
+  --max_output_tokens=400`. `--num_cpu_threads` is left at its runtime
+  default (0 = auto) throughout Phase A: thread count is the *Phase B*
+  variable and is not varied here.
 
+### Frozen system prompt (exact text)
+
+```
 You are explaining technical documentation to a French-speaking engineer. Read the following English technical documentation excerpt, then explain it in French.
 
 Do NOT write long flowing French prose. Instead:
@@ -59,130 +61,122 @@ Do NOT write long flowing French prose. Instead:
 - Only where a relationship is too complex to express as a single arrow chain, add a maximum of 1-2 short French sentences of clarification.
 - Do not infer or add any relationship, transition, or conclusion that is not explicitly stated in the source text.
 - The full response must fit within 400 tokens and reach a complete conclusion within that budget — do not start a chain of reasoning you cannot finish.
+```
 
-- Generation settings: `--backend=cpu --benchmark=true --max_output_tokens=400`.
-  Thread count (`--num_cpu_threads`) left at its runtime default (0 =
-  auto) during Phase A model validation — thread count itself is the
-  Phase B optimization variable, not varied during Phase A.
-- Prompt design history: this exact wording is the result of 10
-  iterative empirical tests on two structurally different source
-  documents (a heterogeneous-CPU-architecture excerpt and a MESI
-  cache-coherency excerpt), comparing 5 structurally distinct output
-  formats (arrow schema, table, SI/ALORS conditional, two-section
-  concepts+relations, guided Q&A) plus targeted fixes for two defects
-  found by manual fidelity verification (a missing general-context
-  opening sentence, and a since-corrected tendency to invent an
-  unsupported relationship when asked for open-ended context). Full
-  investigation trail: see ISSUE_LOG.md entries #8-14.
+**How this wording was reached**: 10 iterative empirical tests on two
+structurally different source documents (a heterogeneous-CPU-architecture
+excerpt and a MESI cache-coherency excerpt), comparing 5 structurally
+distinct output formats (arrow schema, table, SI/ALORS conditional,
+two-section concepts+relations, guided Q&A), plus targeted fixes for two
+defects found by manual fidelity verification: a missing general-context
+opening sentence, and a tendency to invent an unsupported relationship
+when asked for open-ended context. Trail: ISSUE_LOG.md #6-7.
 
 ## Document set (frozen before evaluation)
 
-15 technical documents, categories: Arm documentation, CPU
-documentation, systems documentation, software/runtime documentation,
-APIs, technical papers, implementation documentation.
-List: `data/documents/doc_01.txt` ... `doc_15.txt` (see repo).
+15 technical documents, `data/documents/doc_01.txt` … `doc_15.txt`.
+Categories: Arm documentation, CPU documentation, systems documentation,
+software/runtime documentation, APIs, technical papers, implementation
+documentation.
 
-## Evaluation design
+## Run count: planned, then reduced once
 
-15 documents x 5 runs = 75 output evaluations.
+**Planned**: 15 documents × 5 runs = 75 evaluations.
 
-## Scoring (numeric only, no free-form comments)
+**Actual**: 36 evaluations — `doc_01` and `doc_02` at 5 runs each,
+`doc_03` … `doc_15` at 2 runs each.
 
-Each output scored on, using `data/model_selection/MODEL_SELECTION_SCORING.xlsx`:
-1. Technical correctness
-2. Technical meaningfulness
-3. Semantic preservation
-4. Appropriate handling of established technical terminology
-5. Critical semantic errors (count)
+The reduction was decided **once, in advance of scoring `doc_03`**, not
+applied retroactively. Justification: the original reason for 5 runs was
+to average over sampling noise, and determinism was empirically confirmed
+on `doc_01` (5/5 byte-identical) and `doc_02` (5/5 byte-identical) — 10
+confirmations across two structurally different documents, under varying
+thermal status (NONE/LIGHT) and battery state, with no divergence. The
+default sampling strategy could not be confirmed from source
+(ISSUE_LOG.md #5), so this rests on observed behaviour, not on a
+documented guarantee.
 
-Scale: 1-5 per criterion 1-4 (see the workbook's Instructions sheet
-for the exact rubric). Critical error definition: an error that
-inverts or seriously distorts meaning.
+**Void condition**: if any run on any document had diverged from its
+sibling, the reduction was void and 5-run scoring resumed for all
+subsequent documents, with the divergence investigated and logged. The
+condition was never triggered: the one apparent divergence was traced to
+the run having been given the wrong source text, so the two runs did not
+share an input and were not a divergence. That run was excluded as a
+documented experimental error rather than scored, and the remaining
+observations were byte-identical within every document.
 
-**Scoring process (two-step, human-validated)**:
+## Scoring
 
-1. For each of the 75 outputs, Claude (Anthropic) proposes scores for
-   all 5 criteria, applying the rubric line-by-line against the source
-   document -- verifying fidelity, checking for omissions or invented
-   content, and justifying each score against specific textual
-   evidence rather than holistic impression (same method used to
-   validate doc_01, see ISSUE_LOG.md).
-2. The project author reviews and validates (or corrects) each
-   proposed score before it is recorded in
-   MODEL_SELECTION_SCORING.xlsx. The author is the final decision-maker
-   on every one of the 75 scores -- Claude's proposal is a documented
-   starting point, not the recorded value by default.
+Numeric only, no free-form commentary, recorded in
+`data/model_selection/MODEL_SELECTION_SCORING.xlsx` (exact rubric on the
+Instructions sheet):
 
-**Documented rationale**: this two-step process was adopted because
-Claude also authored the frozen system prompt (see ISSUE_LOG.md
-#8-14), and is therefore not fully independent of the protocol being
-evaluated -- a risk of favorable bias toward outputs produced by a
-prompt it designed. Human validation of every score is the control for
-this risk, rather than relying on either purely automated scoring or
-manual scoring alone (impractical at n=75 given evaluator bilingual
-availability). This limitation and mitigation are carried forward to
-LIMITATIONS.md.
+1. Technical correctness (1-5)
+2. Technical meaningfulness (1-5)
+3. Semantic preservation (1-5)
+4. Appropriate handling of established technical terminology (1-5)
+5. Critical semantic errors (count) — an error that inverts or
+   seriously distorts meaning
 
-## Device state recording (Phase A runs)
+**Two-step, human-validated process.** For each output, an LLM (Claude)
+proposes all 5 scores, applying the rubric line-by-line against the
+source document — verifying fidelity, checking for omissions or invented
+content, and justifying each score against specific textual evidence
+rather than holistic impression. The project author then reviews and
+validates or corrects every proposed score before it is recorded. The
+author is the final decision-maker on every score.
 
-Phase A does not require the strict readiness gate used in Phase B
-(§38-43 of the master prompt) — Phase A's measured variable is output
-content/quality, not latency, and content is expected to be
-independent of thermal/battery state under (likely, though not
-formally confirmed -- see ISSUE_LOG.md #12) deterministic decoding.
+**Why**: the same LLM authored the frozen system prompt, and is
+therefore not independent of the protocol being evaluated — a risk of
+bias favouring outputs produced by a prompt it designed. Human
+validation of every score is the control for that risk. Purely automated
+scoring would inherit the bias; fully manual scoring was impractical at
+this sample size given bilingual-evaluator availability. Carried forward
+as a stated limitation in MODEL_SELECTION_RESULTS.md.
 
-However, thermal status, battery level, and charging state are
-recorded (not gated) before each of the 75 runs, for two reasons:
-(1) to allow a post-hoc check for any correlation between device state
-and output anomalies, given the unresolved determinism uncertainty;
-(2) to identify and exclude, per §37, any run that fails or produces
-a truncated/corrupted result due to an extreme device state (e.g. app
-killed under critical battery), as an instrumentation failure rather
-than a model-quality signal.
+## Device state during Phase A
+
+Phase A does **not** use Phase B's strict readiness gate: the measured
+variable here is output content, not latency, and content is expected to
+be independent of thermal/battery state under deterministic decoding.
+
+Thermal status, battery level and charging state are nevertheless
+*recorded* before each run, for two reasons: to allow a post-hoc check
+for correlation between device state and output anomalies (given the
+unresolved determinism question), and to identify runs that failed or
+truncated because of an extreme device state, so they can be excluded as
+instrumentation failures rather than counted as model-quality signals.
 
 ## Retention criteria
 
-The model is retained if, across all 75 observations:
-1. Output is technically meaningful (per criteria 1-4 above).
-2. No unacceptable proportion of critical semantic errors.
-3. Predefined quality threshold is met: as configured in
-   `MODEL_SELECTION_SCORING.xlsx` (Summary sheet, cells B3-B5) —
-   per-output mean-score threshold, critical-error tolerance, and
-   minimum proportion of outputs required to pass, each set before
-   scoring begins.
-4. Local execution on the Pixel 7 is technically feasible (loads,
-   runs, completes within a reasonable time) — already demonstrated
-   during prompt-design validation testing (Init ~0.4-13.7s depending
-   on cache state, decode ~15-17 tokens/sec, no memory failures
-   observed across 10+ runs).
+The model is retained if, across all scored observations:
 
-Decision uses all 75 observations — not a single favorable output.
+1. Output is technically meaningful (criteria 1-4).
+2. No unacceptable proportion of critical semantic errors.
+3. The predefined quality threshold is met, as configured in
+   `MODEL_SELECTION_SCORING.xlsx` (Summary sheet, cells B3-B5) —
+   per-output mean-score threshold, critical-error tolerance, and minimum
+   proportion of passing outputs, each **set before scoring began**.
+4. Local execution on the Pixel 7 is technically feasible — loads, runs,
+   completes in reasonable time. Already demonstrated during prompt
+   validation (Init ~0.4-13.7 s depending on cache state, decode ~15-17
+   tok/s, no memory failures across 10+ runs).
+
+Those Phase A timings are a **feasibility signal, not a Phase B
+baseline**, and the two are not comparable: Phase A ran USB-connected and
+AC-powered without session-level device isolation, while Phase B runs on
+battery in Airplane Mode (OPTIMIZATION_PARAMETERS.md). Phase B's measured
+decode throughput is 7.4-13.0 tok/s across configurations — lower than
+Phase A's range, consistent with the stricter power and isolation
+conditions rather than with any change to the model or prompt. Nothing in
+Phase A is used as a latency reference.
+
+The decision uses every observation, not a single favourable output.
 
 ## Statistical treatment
 
-Small validation dataset (n=75). Report: individual scores, mean,
-median, score distribution, proportion meeting threshold, critical-error
-count and proportion. This is model-selection evidence, not
-population-level statistical validation.
-
-
-## Run-count reduction (from doc_03 onward)
-
-Determinism was empirically confirmed on doc_01 (5/5 identical runs)
-and doc_02 (5/5 identical runs) -- 10 total confirmations across two
-structurally different documents, under varying thermal status
-(NONE/LIGHT) and battery state, with no observed divergence. Per the
-reasoning in ISSUE_LOG.md #12 (the original rationale for 5 runs --
-averaging over sampling noise -- does not apply if generation is
-deterministic for fixed inputs), the run count is reduced from 5 to
-2 runs per document starting at doc_03. This reduction is a one-time,
-documented decision made before scoring doc_03 -- not a retroactive
-adjustment. If any future run on any document diverges from its
-sibling run, this reduction is void and 5-run scoring resumes for all
-subsequent documents, with the divergence investigated and logged.
-
-## Next step
-
-Results of this protocol are reported in
-../03_experiments_results/MODEL_SELECTION_RESULTS.md, not in this
-document.
+Small validation sample. Report individual scores, mean, median,
+distribution, proportion meeting threshold, and critical-error count and
+proportion. No inferential statistics — this is model-selection
+evidence supporting a go/no-go decision for this project, not a
+population-level claim about model quality.

@@ -1,107 +1,91 @@
 # Runtime Selection
 
-## Candidates considered
+> **Scope**: which inference runtime is used, which executable is used
+> for measurement, and the exact build and deployment record for it.
 
-1. **MediaPipe LLM Inference API** — rejected. Google's official
-   documentation states this API is now in maintenance-only mode, with
-   new features and optimizations focused on LiteRT-LM.
-   Source: https://developers.google.com/edge/mediapipe/solutions/genai/llm_inference
+## Runtime: LiteRT-LM
 
-2. **LiteRT-LM** — selected. Active development, official successor to
-   MediaPipe LLM Inference API for on-device LLM inference.
+| Candidate | Outcome |
+|---|---|
+| **MediaPipe LLM Inference API** | Rejected. Google's own documentation states the API is in maintenance-only mode, with new features and optimizations directed to LiteRT-LM. Source: https://developers.google.com/edge/mediapipe/solutions/genai/llm_inference |
+| **LiteRT-LM** | **Selected.** Actively developed, official successor for on-device LLM inference |
 
-## Selected runtime: LiteRT-LM
+## Two entry points, two different flag sets
 
-## Two distinct LiteRT-LM entry points identified
+This distinction must not be collapsed — the two executables expose
+different flags, and several published flag names apply to only one of
+them.
 
-During verification, two separate executables were found to expose
-different flag sets. This distinction matters and must not be
-collapsed:
+### A. `pip`-installed CLI (`litert-lm`, v0.16.0) — reconnaissance only
 
-### A. `pip`-installed CLI (`litert-lm`, v0.16.0)
+- Runs inference **on the host machine only**. No flag exists to target
+  a connected Android device (no `--device`, `--adb`, or equivalent) —
+  ISSUE_LOG.md #1.
+- Exposes `--cpu-thread-count`, `--backend [cpu|gpu|npu]`, and sampling
+  flags (`--temperature`, `--top_k`, ...).
+- **Not used for any measurement.** Informational only.
 
-Installed via `pip install litert-lm` in a Python virtual environment.
-Used for initial reconnaissance of available configuration surfaces.
+### B. Natively built `litert_lm_advanced_main` — all measurements
 
-- Runs inference **locally on the host machine only** — no flag exists
-  to target a connected Android device (no `--device`, `--adb`, or
-  equivalent).
-- Exposes `--cpu-thread-count`, `--backend [cpu|gpu|npu]`.
-- **Not used for actual on-device measurement** — informational only.
+This is the binary used for every Phase A and Phase B measurement.
 
-### B. Natively-built `litert_lm_advanced_main` (used for actual measurement)
+```bash
+bazel build --config=android_arm64 //runtime/engine:litert_lm_advanced_main
+```
 
-Built from source via Bazel, targeting `android_arm64`, and deployed
-directly to the Pixel 7 via `adb push`. **This is the binary used for
-all Phase B measurements** — superseding an earlier attempt with the
-simpler `litert_lm_main` demo binary, which does not implement
-generation-length control (see ISSUE_LOG.md #8). `litert_lm_advanced_main`
-implements `--benchmark`, `--benchmark_prefill_tokens`, and
-`--benchmark_decode_tokens`, required to enforce the project's fixed
-workload output-length constraint (§5).
+- Build environment: WSL2 (Ubuntu 26.04 LTS), Bazel 7.6.1 via Bazelisk,
+  Android NDK r28b.
+- Build output verified: ELF 64-bit LSB PIE executable, ARM aarch64, for
+  Android 31, built by NDK r28b (~39 MB).
+- Deployed by `adb push` to `/data/local/tmp/`.
 
-Build command: `bazel build --config=android_arm64 //runtime/engine:litert_lm_advanced_main`
-- Build environment: WSL2 (Ubuntu 26.04 LTS), Bazel 7.6.1 (via
-  Bazelisk), Android NDK r28b.
-- Build result verified: ELF 64-bit LSB pie executable, ARM aarch64,
-  for Android 31, built by NDK r28b, 39,499,960 bytes.
-- **Exposes a different flag set than the `pip` CLI** — see below.
-  This binary corresponds to the simpler `litert_lm_main.cc` demo
-  entry point, not the full-featured CLI.
+**Why this entry point and not `litert_lm_main`.** An earlier attempt
+used the simpler `litert_lm_main` demo binary. It does not implement
+generation-length control: `--max_output_tokens` had no effect across 5
+consecutive runs, source-confirmed as never being read by that entry
+point (ISSUE_LOG.md #3). `litert_lm_advanced_main` implements
+`--benchmark` and the `benchmark_prefill_tokens` /
+`benchmark_decode_tokens` settings, which is what makes the project's
+fixed output-length constraint enforceable.
 
-## Configuration surfaces confirmed for the native binary (verified via `--helpfull` on-device)
+Only the length-control mechanism differs between the two entry points.
+`--num_cpu_threads`, `--backend` and `--enable_ynnpack` are declared in
+`runtime/engine/shared_flags.cc`, shared by both — so findings about
+those flags survived the binary switch.
 
-- **CPU thread count**: `--num_cpu_threads` (NOT `--cpu-thread-count`
-  as in the `pip` CLI). "If greater than 0, the number of CPU threads
-  to use for the LLM execution with CPU backend." **Default: 0**
-  (auto/runtime-decided), not a fixed default of 4 as documented for
-  `CpuConfig` elsewhere. This distinction must be stated explicitly in
-  OPTIMIZATION_PARAMETERS.md per §30 (documented default vs.
-  automatic selection vs. explicitly configured value).
-- **Backend selection**: `--backend [cpu|gpu|...]`, default `"gpu"`
-  in this binary (not `cpu` — must be explicitly overridden for all
-  V1 experiments).
-- **XNNPACK**: confirmed again — no independent `--enable_xnnpack`
-  toggle exists in this binary either. Consistent with the `pip` CLI
-  finding: XNNPACK is not an independently switchable path, it is the
-  CPU backend's implementation itself.
-- **Model path**: `--model_path` (local file path to `.litertlm`) or
-  `--input_prompt` / `--input_prompt_file` for the prompt.
+## Configuration surface of the measurement binary
 
-Note: `--num_cpu_threads`, `--backend`, and `--enable_ynnpack` are
-declared in `shared_flags.cc`, shared by both `litert_lm_main` and
-`litert_lm_advanced_main` — findings about these flags remain valid
-after the binary switch. Only the length-control mechanism
-(`--max_output_tokens` / `--benchmark_*`) differs between the two.
+Verified via `--helpfull` on-device, not from published documentation.
 
+| Flag | Finding |
+|---|---|
+| `--num_cpu_threads` | "If greater than 0, the number of CPU threads to use for the LLM execution with CPU backend." **Default: 0** (auto / runtime-decided) — *not* a fixed default of 4 as documented for `CpuConfig` elsewhere. Recorded as an automatic default, never treated as an explicitly configured value |
+| `--backend` | `[cpu|gpu|...]`, **default `gpu`** in this binary. Must be explicitly overridden to `cpu` on every run |
+| XNNPACK | **No independent toggle exists** — consistent with the `pip` CLI. XNNPACK is not a switchable path, it is the CPU backend's implementation. See OPTIMIZATION_PRE_SCREENING.md, "Not a lever" |
+| `--cache_dir`, `--disable_weight_cache` | Weight cache control. Retained as Lever 2 — see OPTIMIZATION_PRE_SCREENING.md |
+| `--max_output_tokens`, `--benchmark` | The working length-control combination (ISSUE_LOG.md #4) |
+| `--model_path`, `--input_prompt` / `--input_prompt_file` | Model and prompt input |
+| Sampling flags | **Absent** on this binary (no `--seed`, `--temperature`, `--top_k`, `--top_p`), unlike the `pip` CLI. The default sampling strategy is an open uncertainty — ISSUE_LOG.md #5 |
+| `--enable_ynnpack` | Undocumented CPU delegate ("Delegate supported CPU operations to YNNPACK before XNNPACK"), default `false`, confirmed in source across 13 locations. Evaluated and rejected for V1 — see OPTIMIZATION_PRE_SCREENING.md |
 
-## New finding: `--enable_ynnpack` flag (undocumented)
+## Deployment constraints
 
-A flag named `--enable_ynnpack` (default: `false`) was found in the
-native binary's `--helpfull` output and confirmed in source
-(`runtime/engine/shared_flags.cc`,
-`runtime/executor/llm_executor_settings.h`): "Delegate supported CPU
-operations to YNNPACK before XNNPACK." Spelling confirmed consistent
-(not a typo) across 13 locations in the source tree.
+**1. Prebuilt shared library.** The binary depends on
+`libGemmaModelConstraintProvider.so`, which its own Bazel target does not
+produce. It is distributed as a prebuilt in the cloned repository at
+`prebuilt/android_arm64/libGemmaModelConstraintProvider.so` (verified: real
+ELF shared object, ARM aarch64, for Android 23, built by NDK r29 — not a
+Git LFS pointer). It must be pushed to the device alongside the binary
+(ISSUE_LOG.md #2).
 
-No public documentation for "YNNPack" was identified. This is treated
-as a candidate optimization lever, evaluated and REJECTED for V1 on
-documentation-accessibility grounds — see
-OPTIMIZATION_PRE_SCREENING.md for the full rationale.
+**2. `LD_LIBRARY_PATH` on every invocation.** Android's dynamic linker
+does not search an executable's own directory for shared libraries under
+`/data/local/tmp/`, so every call must set it explicitly or fail with
+`CANNOT LINK EXECUTABLE`:
 
-## Deployment constraint: dynamic library dependency
+```bash
+adb shell "cd /data/local/tmp && LD_LIBRARY_PATH=/data/local/tmp ./litert_lm_advanced_main --backend=cpu ..."
+```
 
-The native binary depends on `libGemmaModelConstraintProvider.so`, not
-produced by the `bazel build` of the `litert_lm_main` target itself,
-but distributed as a prebuilt shared library in the cloned repository
-at `prebuilt/android_arm64/libGemmaModelConstraintProvider.so`
-(verified: real ELF shared object, ARM aarch64, for Android 23, built
-by NDK r29, 19,589,096 bytes — not a Git LFS pointer). Must be pushed
-to the device alongside the main binary.
-
-## Deployment constraint: `LD_LIBRARY_PATH` required at runtime
-
-Android's dynamic linker does not automatically search the executable's
-own directory for shared libraries on `/data/local/tmp/`. Every
-invocation of the native binary on-device must set
-`LD_LIBRARY_PATH=/data/local/tmp` explicitly:
+The full frozen invocation used for measurement is in
+../02_protocols/OPTIMIZATION_PARAMETERS.md.

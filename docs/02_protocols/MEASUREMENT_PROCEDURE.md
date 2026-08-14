@@ -1,145 +1,168 @@
-# Measurement Procedure
+# Measurement Procedure (Phase B)
 
-> **Scope**: HOW to execute a measurement, step by step, in
-> chronological order. References the frozen parameters defined in
-> OPTIMIZATION_PARAMETERS.md — does not redefine them here.
+> **Scope**: HOW a measurement is executed, in chronological order. The
+> frozen parameters, thresholds and decision rules it applies are defined
+> in OPTIMIZATION_PARAMETERS.md and are not redefined here.
 
-## Prerequisites (one-time setup, before the first measurement)
+Order of this document = order of execution: one-time setup → per-session
+preconditions → per-run procedure → per-configuration sampling →
+campaign-level steps.
 
-1. Pixel 7 connected via USB, `adb devices` confirms `device` status
-   (not `unauthorized`).
+## 1. One-time setup
+
+1. `adb devices` reports the device as `device` (not `unauthorized`).
 2. `litert_lm_advanced_main` and `libGemmaModelConstraintProvider.so`
-   pushed to `/data/local/tmp/` (see RUNTIME_SELECTION.md for the
-   build/deployment record).
-3. `gemma-4-E2B-it.litertlm` pushed to `/data/local/tmp/`, SHA256
-   verified against the value recorded in MODEL_SELECTION_PROTOCOL.md.
-4. The frozen doc_07 prompt file (system prompt + doc_07 source text,
-   per OPTIMIZATION_PARAMETERS.md) pushed to `/data/local/tmp/` as
-   `phase_b_prompt.txt`.
-5. Device fully charged or charging, screen timeout disabled or
-   device kept awake for the duration of the campaign (to avoid
-   mid-run suspension).
+   pushed to `/data/local/tmp/`, binary made executable. See
+   ../01_research/RUNTIME_SELECTION.md for the build record and the
+   mandatory `LD_LIBRARY_PATH` constraint.
+3. `gemma-4-E2B-it.litertlm` pushed to `/data/local/tmp/`, SHA256 verified
+   against MODEL_SELECTION_PROTOCOL.md.
+4. `phase_b_prompt.txt` pushed to `/data/local/tmp/`, SHA256 verified
+   against OPTIMIZATION_PARAMETERS.md.
+5. One manual run executed end-to-end and inspected by hand, before any
+   automated batch: confirm a French arrow-schema output and a populated
+   `BenchmarkInfo` block. A `Failed to get decode profile summary:
+   INVALID_ARGUMENT` warning is expected and harmless (ISSUE_LOG.md #8).
 
-## Per-run procedure
+## 2. Per-session preconditions
 
-Every single measurement run, regardless of configuration, follows
-this exact sequence:
+Confirmed **once** at session start, not re-checked per run. Two batches
+were discarded for violating these (ISSUE_LOG.md #15, #16) — they are not
+optional.
 
-1. **Readiness gate check.**
-   ```
-   adb shell dumpsys thermalservice | Select-String "Thermal Status"
-   adb shell dumpsys battery | Select-String "level|status|Charging state"
-   ```
-   Compare against OPTIMIZATION_PARAMETERS.md thresholds (thermal
-   status NONE/LIGHT, battery ≥20%, charging). If any parameter fails:
-   wait, re-check, do not proceed until all three pass.
+1. **Wireless ADB, device disconnected from power.** `adb tcpip 5555`,
+   then `adb connect <device-ip>:5555`, then unplug USB. Measurements run
+   on battery: charging plus CPU-bound inference is a second,
+   uncontrolled heat source.
+2. **Battery ≥ 50%** at session start, and expected to hold for the
+   session's duration.
+3. **Airplane Mode on, then Wi-Fi re-enabled on top.** Disables cellular
+   and Bluetooth — both can wake device components and consume CPU
+   unpredictably — while preserving wireless ADB. Re-confirm `adb devices`
+   afterwards.
+4. **Automatic app updates disabled** (Play Store). A background download
+   or install during a 30-minute batch is an uncontrolled CPU and network
+   confound.
+5. **Other apps closed.** A competing process corrupts both latency and
+   the `cpu_pct` reading.
+6. **No physical interaction with the device during measurement.** No
+   screen wake, no touch, no app switching. The screen may time out and
+   turn off on its own — that is expected and does not affect the run,
+   since the binary executes independently of display state.
 
-2. **Record device state** (thermal status, battery %, charging state,
-   timestamp) — logged for every run, not just readiness-gate
-   failures, per §76 of the master prompt's raw-data schema.
+If the device is handled or reconnected mid-session (for example after a
+battery pause), re-confirm all six before resuming, and note the
+interruption in the raw log rather than continuing silently.
 
-3. **Run the measurement.**
-   ```
-   adb shell "LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/litert_lm_advanced_main --backend=cpu --max_output_tokens=400 --benchmark=true --num_cpu_threads=<N> --model_path=/data/local/tmp/gemma-4-E2B-it.litertlm --input_prompt_file=/data/local/tmp/phase_b_prompt.txt"
-   ```
-   Omit `--num_cpu_threads=<N>` entirely for the baseline (auto)
-   configuration — do not pass `--num_cpu_threads=0` as a stand-in,
-   since that is not confirmed equivalent to omitting the flag (see
-   OPTIMIZATION_PARAMETERS.md, baseline note).
+## 3. Per-run procedure
 
-4. **Capture the full output**, including the `BenchmarkInfo` block
-   (Init phases, Time to first token, Prefill Turn, Decode Turn,
-   tokens/sec for both).
+Every run, in every configuration, follows this sequence. All of it is
+implemented by `scripts/run_config.py` — steps are listed here because
+the harness is the executable form of this protocol, not a replacement
+for it.
 
-5. **Verify output integrity** before logging: confirm the generated
-   text matches the expected doc_07 explanation (same structure as
-   Phase A's doc_07 runs) — a garbled or empty output is an
-   instrumentation failure, excluded per §37 of the master prompt, not
-   a valid data point.
+1. **Readiness gate.** Read thermal status (`dumpsys thermalservice`) and
+   battery level (`dumpsys battery`). Proceed only when thermal status is
+   NONE or LIGHT **and** battery ≥ 50%. Otherwise wait and re-check; do
+   not proceed on a partial pass.
+   An adb-level failure (ambiguous device, offline, daemon unreachable)
+   is a **hard stop**, never treated as "not ready" and never retried in
+   a loop (ISSUE_LOG.md #11).
+2. **Record device state** — thermal status, battery %, timestamp — for
+   every run, not only for gate failures.
+3. **Run the measurement** with the frozen invocation from
+   OPTIMIZATION_PARAMETERS.md. Omit `--num_cpu_threads` entirely for the
+   baseline configuration; do not pass `0` as a stand-in.
+4. **Capture the full output**, including the `BenchmarkInfo` block (init
+   phases, time to first token, prefill and decode turns, tokens/sec).
+5. **Collect resource metrics** by polling `/proc/<PID>/status` (`VmHWM`
+   → peak RSS) and `/proc/<PID>/stat` (`utime`+`stime` → CPU %) at ~1 Hz
+   for the process's lifetime. The PID must be the binary's own — the
+   launch uses `exec` so the background job's PID is not an intermediate
+   shell's (ISSUE_LOG.md #10).
+6. **Verify output integrity** before logging: the generated text must
+   match the expected `doc_07` explanation structure. Garbled or empty
+   output is an instrumentation failure, not a data point.
+7. **Log the run** to `data/raw/<configuration>.csv` with the full
+   schema: timestamp, configuration, thread count, run type, thermal
+   status (start and end), battery %, end-to-end latency, init total,
+   TTFT, prefill tokens and speed, decode tokens and speed, peak RSS, CPU
+   %, validity, exclusion reason. A run that fails `BenchmarkInfo`
+   parsing is written as `invalid` **with** a reason — never dropped.
+8. **Recovery interval** before the next readiness check.
 
-6. **Log the run** to `data/raw/<configuration>.csv` with the full
-   schema: timestamp, configuration, thread count, thermal status,
-   battery %, charging state, latency (end-to-end), TTFT, prefill
-   tokens/sec, decode tokens/sec, peak memory (if available), validity
-   status.
+## 4. Per-configuration sampling
 
-7. **Recovery interval**: wait a minimum of 60 seconds (per
-   OPTIMIZATION_PARAMETERS.md) before the next run's readiness check.
+1. **Stabilization first.** Run the per-run procedure repeatedly, tagged
+   `warmup`, until the rolling 5-run median latency changes by less than
+   10% from the previous 5-run window. Record the stabilization run count.
+   Warm-up rows stay in the raw CSV, excluded from statistics but never
+   deleted. Note that comparing two windows takes a **minimum of 10**
+   warm-up runs — this campaign ran a fixed 5 per configuration and so
+   never actually evaluated the criterion (deviation 3 in
+   ../03_experiments_results/OPTIMIZATION_RESULTS.md).
+2. **Then the valid sample**: 30 runs tagged `valid` (or 20, only if the
+   pilot showed 30 to be infeasible — decided once, before the campaign,
+   and applied uniformly).
+3. The stabilization window must run without major time gaps and with the
+   battery floor holding throughout. If either breaks, discard the batch
+   and restart from run 1 rather than patching it.
 
-## Stabilization phase (per configuration)
+**Configuration order**: do not run all configurations in a fixed,
+always-identical order, and in particular not in ascending or descending
+parameter order — that makes session-position drift indistinguishable from
+the parameter's effect. Log the realized order, and verify it against the
+CSV timestamps rather than from memory: this campaign's logged order turned
+out to disagree with its own data (deviation 1 in
+../03_experiments_results/OPTIMIZATION_RESULTS.md).
 
-Before the 30 valid measurement runs begin for a given configuration:
+**Pilot**: run stabilization once on baseline before the full campaign and
+use its real timings to confirm or revise the time-budget estimate in
+OPTIMIZATION_PARAMETERS.md, and therefore whether the 20-run fallback is
+needed.
 
-1. Run the per-run procedure above repeatedly, logging each run's
-   latency into a rolling window.
-2. After each run, compute the median latency of the current 5-run
-   window and compare to the previous 5-run window's median.
-3. Stabilization is reached when this change is under 10% (per
-   OPTIMIZATION_PARAMETERS.md). Record the stabilization run count for
-   this configuration.
-4. All stabilization-phase runs are retained in the raw log (marked as
-   `warmup`, not `valid`) — never discarded silently, per §34 of the
-   master prompt.
-5. Once stabilized, begin the 30 valid measurement runs (or 20, only
-   if the pilot run below shows the 30-run target is infeasible within
-   the project's time budget — this decision is made once, before the
-   full campaign, not per-configuration).
+## 5. Robustness replication (mandatory)
 
-## Configuration order
+After the campaign identifies the best-performing configuration, replicate
+it — 10 valid runs, identical procedure — in a **genuinely separate
+session**, defined as: a different day, **or** after a device reboot,
+**or** after an idle period substantially longer than the standard
+recovery interval. Record which condition applied.
 
-Per §45 of the master prompt, avoid running all configurations in a
-fixed, always-identical order. Suggested alternating pattern for the 5
-configurations (baseline, 1, 2, 4, 8 threads):
+Compare median latency and ranking against the original campaign result
+for that configuration and for baseline, then apply the ROBUST decision
+rule in OPTIMIZATION_PARAMETERS.md.
 
-```
-baseline → 4 → 1 → 8 → 2 → (repeat if multiple passes needed)
-```
+No configuration may be reported as final without this step.
 
-Record the actual order used — this is a suggested pattern, not a
-requirement to follow exactly, but the realized order must be logged.
+> **Realized: the separation condition was not met.** The `threads_4`
+> re-measurement ran 311 s after the previous configuration's last run, on
+> the same day and in the same uninterrupted session, with no reboot and no
+> condition recorded. It is a within-session re-measurement, not a
+> replication in the sense defined above. Deviation 2 in
+> ../03_experiments_results/OPTIMIZATION_RESULTS.md.
 
-## Pilot run (before the full campaign)
+## 6. Post-campaign
 
-Run the stabilization phase once on the baseline configuration only,
-and use its actual timings to confirm or revise the OPTIMIZATION_PARAMETERS.md
-time-budget estimate (~16-17s/run, ~2.5-4h total). If real timings
-diverge meaningfully from the estimate, decide now — before starting
-the full campaign — whether to invoke the documented 20-run fallback.
-This decision, once made, applies uniformly to all 5 configurations.
-
-## Thread-count robustness replication
-
-After the full campaign identifies the best-performing thread-count
-configuration, replicate it (10 valid runs, same procedure as above)
-in a genuinely separate session — defined as: a different day, OR
-after a device reboot, OR after an idle period longer than the
-standard recovery interval. Record which condition applied. Compare
-median latency and ranking against the original campaign's result for
-that configuration and for baseline.
-
-- If the ranking and approximate magnitude hold: mark ROBUST.
-- If the ranking flips or the effect collapses within the original
-  noise band: mark NOT ROBUST, and do not report this configuration as
-  the final result — fall back to the next-strongest configuration
-  that has itself been replicated, or report that no reproducible
-  thread-count effect was established.
-
-This step is mandatory before any final selection, per the project's
-own continuation rules (do not report a thread-count "final"
-configuration without this replication).
-
-## Post-campaign
-
-1. Confirm every configuration's raw CSV in `data/raw/` contains the
-   expected number of valid runs (30, or 20 if the fallback was
-   invoked) plus its full stabilization-phase log.
-2. Proceed to `analysis/compute_stats.py` for aggregate statistics
-   (median, mean, SD, speedup, latency reduction per §49 of the master
-   prompt) — not computed manually.
-3. Results, including the mandatory heterogeneity caveat and
-   replication outcome, are written to
-   `docs/03_experiments_results/RESULTS.md` following the presentation
-   order fixed in the master prompt (§60): configuration → readiness →
-   warm-up → steady-state → CPU/thread behavior (heterogeneity caveat
-   first) → replication → memory → thermal → quality → comparison →
-   final decision.
+1. Confirm every configuration's CSV in `data/raw/` contains the expected
+   number of valid runs plus its full stabilization log.
+2. Compute aggregate statistics with `python analysis/compute_stats.py` —
+   median, mean, SD, min, max, speedup, latency reduction, decode
+   throughput, CPU %, peak RSS. Never by hand. The script consumes only
+   rows where `run_type=valid` and `validity=valid`, and regenerates
+   `webapp/dashboard/index.html`.
+3. Report results in this order: configuration → readiness → warm-up →
+   steady state → CPU/thread behaviour (**heterogeneity caveat first**) →
+   replication → memory → thermal → quality → comparison → final
+   decision. This order is realized on the generated dashboard, in
+   ../03_experiments_results/OPTIMIZATION_RESULTS.md, and in summary in the
+   root README.
+4. **Audit the realized campaign against this protocol** before publishing
+   any figure: re-read `data/raw/*.csv` timestamps and battery columns and
+   check the actual configuration order, the gap and power state around the
+   replication batch, the warm-up run count per configuration, and the
+   inter-configuration recovery intervals. Doing this after the fact on
+   this campaign surfaced four deviations that the run logs alone did not
+   make obvious — they are recorded in
+   ../03_experiments_results/OPTIMIZATION_RESULTS.md, "Realized vs.
+   specified". Deviations get disclosed, not smoothed over.

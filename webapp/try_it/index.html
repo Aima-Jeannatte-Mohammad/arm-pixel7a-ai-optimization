@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tech-Explique-Moi -- Try It</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, sans-serif; max-width: 1000px; margin: 0 auto 60px; padding: 0 20px;
+         background: #0d1117; color: #e6edf3; overflow-x: hidden; }
+  .topnav { display: flex; align-items: center; gap: 6px; padding: 14px 0; margin-bottom: 20px;
+            border-bottom: 1px solid #30363d; flex-wrap: wrap; }
+  .navbrand { font-weight: 700; margin-right: 20px; color: #58a6ff; }
+  .navlink { color: #8b949e; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; }
+  .navlink:hover { background: #161b22; color: #e6edf3; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 0.95rem; margin-top: 0; }
+  .intro { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px 20px; margin: 20px 0; font-size: 0.9rem; line-height: 1.6; }
+  h2 { font-size: 1.2rem; margin-top: 44px; padding: 10px 14px; background: #161b22; border-left: 4px solid #58a6ff; border-radius: 4px; }
+  h3 { font-size: 1.0rem; margin-top: 28px; color: #8b949e; }
+  .caveat { background: #3d2b00; border-left: 4px solid #d29922; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 0.9rem; }
+  .limitation { background: #1c1032; border-left: 4px solid #a371f7; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 0.9rem; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; margin-left: 8px; }
+  .badge.ok { background: #1b4d2a; color: #3fb950; }
+  .badge.warn { background: #4d3a1b; color: #d29922; }
+  .badge.bad { background: #4d1b1b; color: #f85149; }
+  .badge.info { background: #1c3a5e; color: #58a6ff; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 0.85rem; }
+  th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid #30363d; }
+  th { color: #8b949e; font-weight: 600; }
+  textarea { width: 100%; min-height: 140px; background: #0d1117; color: #e6edf3; border: 1px solid #30363d;
+             border-radius: 6px; padding: 12px; font-family: inherit; font-size: 0.9rem; resize: vertical; }
+  button { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px;
+           font-size: 0.9rem; cursor: pointer; margin-top: 12px; }
+  button:hover { background: #2ea043; }
+  button:disabled { background: #30363d; cursor: not-allowed; }
+  .output-box { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-top: 16px;
+                white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.88rem; line-height: 1.6; min-height: 60px; }
+  .metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px; }
+  .metric { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px; text-align: center; }
+  .metric .value { font-size: 1.2rem; font-weight: 700; color: #58a6ff; }
+  .metric .label { font-size: 0.7rem; color: #8b949e; margin-top: 2px; }
+  #usbStatus { font-size: 0.85rem; margin-top: 10px; }
+  code { background: #161b22; padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<nav class="topnav">
+  <div class="navbrand">Tech-Explique-Moi</div>
+  <a href="../model-selection/index.html" class="navlink">Model Selection (Phase A)</a>
+  <a href="../dashboard/index.html" class="navlink">Optimization Results (Phase B)</a>
+  <a href="../try_it/index.html" class="navlink">Try It</a>
+</nav>
+
+<h1>Try the Fixed Workload</h1>
+<p class="subtitle">English technical documentation &rarr; compact French arrow-schema</p>
+
+<div class="limitation">
+<strong>Honest limitation of this page:</strong> this is a static website. A
+browser cannot execute <code>adb shell</code> commands or run the LiteRT-LM
+binary on a physically connected Android device -- that requires a local
+terminal and USB/network access, as documented in
+<code>docs/02_protocols/MEASUREMENT_PROCEDURE.md</code>. This page therefore
+does <strong>not</strong> run live inference. It shows the frozen prompt and
+workload format, and a real, previously-measured example (not invented) from
+the actual measurement campaign, so you can see exactly what the on-device
+pipeline produces without this page pretending to run it for you.
+</div>
+
+<h2>Reference Device Requirement</h2>
+<div class="caveat">
+All measurements in this project (Phase A and Phase B) were performed on one
+specific physical device: <strong>Google Pixel 7</strong> (codename
+<code>panther</code>), <strong>Google Tensor G2</strong> SoC (8 cores:
+4&times; Cortex-A55, 2&times; Cortex-A78, 2&times; Cortex-X1),
+<strong>Android 16</strong>. Results are explicitly scoped to this device
+and are <strong>not</strong> claimed to generalize
+to other Arm devices. If you deploy this workload's binary
+(<code>litert_lm_advanced_main</code>) to a different Pixel model, a
+different SoC, or a different Android version, it may run with different
+timing, may behave differently, or may not run at all (e.g. a different NDK
+ABI or Android API level could reject the binary).
+</div>
+
+<h3>Best-effort USB device check</h3>
+<p style="font-size:0.85rem; color:#8b949e;">
+This uses the browser's WebUSB API (Chrome/Edge only) to check whether
+<em>any</em> USB device is connected and read its reported vendor/product ID
+if you grant permission. This is <strong>not</strong> the ADB protocol --
+WebUSB cannot query Android thermal status, battery, or run shell commands.
+It only confirms a USB device is present, as a sanity check, not a
+verification that it is specifically a Pixel 7.
+</p>
+<button id="usbCheckBtn">Check for connected USB device</button>
+<div id="usbStatus"></div>
+
+<h2>The Frozen Workload</h2>
+<p style="font-size:0.85rem; color:#8b949e;">
+Paste any English technical documentation excerpt below. This does not run
+inference (see limitation above) -- it shows you the exact frozen system
+prompt that would be sent to the model, per
+<code>docs/02_protocols/MODEL_SELECTION_PROTOCOL.md</code>.
+</p>
+<textarea id="userInput" placeholder="Paste English technical documentation here (e.g. an API description, an RFC excerpt, a kernel doc snippet)...">During slow start, a TCP increments cwnd by at most SMSS bytes for each ACK received that cumulatively acknowledges new data. Slow start ends when cwnd exceeds ssthresh, or when congestion is observed.</textarea>
+<button id="showPromptBtn">Show frozen prompt for this input</button>
+<div class="output-box" id="promptOutput" style="display:none;"></div>
+
+<h2>Real Example from the Measurement Campaign</h2>
+<p style="font-size:0.85rem; color:#8b949e;">
+This is the actual frozen workload (<code>doc_07</code>, an RFC 5681 TCP
+congestion-control excerpt) and its real, measured output from the current
+optimal configuration identified in Phase B -- not a fabricated example.
+Source: <code>data/raw/threads_4.csv</code> and Phase B replication data.
+</p>
+<div class="output-box" id="exampleOutput"></div>
+<div class="metrics-row" id="exampleMetrics"></div>
+
+<script>
+// ---- Frozen system prompt (verbatim, from MODEL_SELECTION_PROTOCOL.md) ----
+const FROZEN_PROMPT = `You are explaining technical documentation to a French-speaking engineer. Read the following English technical documentation excerpt, then explain it in French.
+
+Do NOT write long flowing French prose. Instead:
+- Begin with a direct French translation of the source text's opening/title sentence (the sentence that typically defines what the document is about), translated as-is -- do not add interpretation, context, or synthesis beyond what that single sentence states.
+- Then build a compact schema using arrows (\u2192) connecting technical concepts.
+- Keep established technical terms in English where conventionally used (e.g., "cache", "thread", "scheduler", "pipeline").
+- Between each pair of connected terms, write IN FRENCH the specific relationship or action linking them, based on what the source text actually describes.
+- Only where a relationship is too complex to express as a single arrow chain, add a maximum of 1-2 short French sentences of clarification.
+- Do not infer or add any relationship, transition, or conclusion that is not explicitly stated in the source text.
+- The full response must fit within 400 tokens and reach a complete conclusion within that budget.
+
+--- English source document ---
+
+{{USER_INPUT}}
+
+--- End of source document ---`;
+
+document.getElementById('showPromptBtn').addEventListener('click', () => {
+  const input = document.getElementById('userInput').value.trim() || '[paste a document above]';
+  const rendered = FROZEN_PROMPT.replace('{{USER_INPUT}}', input);
+  const box = document.getElementById('promptOutput');
+  box.textContent = rendered;
+  box.style.display = 'block';
+});
+
+// ---- Real measured example (doc_07, threads_4, actual campaign data) ----
+const REAL_EXAMPLE = {
+  source: "During slow start, a TCP increments cwnd by at most SMSS bytes for each ACK received that cumulatively acknowledges new data. Slow start ends when cwnd exceeds ssthresh, or when congestion is observed. When TCP has not received a segment for more than one retransmission timeout, cwnd is reduced to the value of the restart window (RW) before transmission begins. Upon a timeout, cwnd MUST be set to no more than the loss window, LW, which equals one full-sized segment. After retransmitting the dropped segment, the TCP sender uses the slow start algorithm to increase the window from one full-sized segment to the new value of ssthresh, at which point congestion avoidance again takes over.",
+  output: "TCP increment cwnd by at most SMSS bytes for each ACK re\u00e7u that cumulatively acknowledges new data \u2192 Slow start se termine quand cwnd d\u00e9passe ssthresh ou quand congestion est observ\u00e9e.\nSlow start se termine quand cwnd d\u00e9passe ssthresh \u2192 cwnd est r\u00e9duit \u00e0 la valeur de RW avant la transmission \u2192 si TCP n'a pas re\u00e7u de segment pendant plus d'un retransmission timeout \u2192 transmission commence.\nUpon a timeout \u2192 cwnd DOIT \u00eatre d\u00e9fini \u00e0 pas plus que LW \u2192 LW est \u00e9gal \u00e0 un segment de taille compl\u00e8te.\nAfter retransmitting the dropped segment \u2192 l'exp\u00e9diteur TCP utilise l'algorithme slow start \u2192 augmenter la fen\u00eatre de un segment de taille compl\u00e8te \u00e0 la nouvelle valeur de ssthresh \u2192 \u00e0 ce moment-l\u00e0, congestion avoidance reprend le dessus.",
+  config: "threads_4 (ROBUST; re-measured within session -- see OPTIMIZATION_RESULTS.md)",
+  latency_s: 24.874,
+  decode_tok_s: 17.8,
+  device: "Google Pixel 7, Tensor G2, Android 16"
+};
+
+document.getElementById('exampleOutput').textContent = REAL_EXAMPLE.output;
+document.getElementById('exampleMetrics').innerHTML = `
+  <div class="metric"><div class="value">${REAL_EXAMPLE.latency_s}s</div><div class="label">End-to-end latency</div></div>
+  <div class="metric"><div class="value">${REAL_EXAMPLE.decode_tok_s}</div><div class="label">Decode tok/s</div></div>
+  <div class="metric"><div class="value">threads_4</div><div class="label">Configuration</div></div>
+  <div class="metric"><div class="value"><span class="badge ok">ROBUST</span></div><div class="label">Replication verdict</div></div>
+`;
+
+// ---- Best-effort WebUSB device presence check (honest scope) ----
+document.getElementById('usbCheckBtn').addEventListener('click', async () => {
+  const status = document.getElementById('usbStatus');
+  if (!('usb' in navigator)) {
+    status.innerHTML = '<span class="badge warn">UNAVAILABLE</span> WebUSB is not supported in this browser (try Chrome or Edge on desktop).';
+    return;
+  }
+  try {
+    const device = await navigator.usb.requestDevice({ filters: [] });
+    status.innerHTML = `<span class="badge info">USB DEVICE DETECTED</span> Vendor ID: 0x${device.vendorId.toString(16)}, Product ID: 0x${device.productId.toString(16)}. ` +
+      `This confirms a USB device is connected -- it does NOT confirm this is a Pixel 7 or that ADB is authorized (WebUSB cannot speak the ADB protocol).`;
+  } catch (err) {
+    status.innerHTML = '<span class="badge warn">NO DEVICE SELECTED</span> No USB device was selected, or permission was denied.';
+  }
+});
+</script>
+</body>
+</html>
