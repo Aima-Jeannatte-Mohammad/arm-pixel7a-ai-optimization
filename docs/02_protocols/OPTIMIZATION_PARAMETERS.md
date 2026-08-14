@@ -12,21 +12,15 @@ every Phase B measurement, per §5 of the master prompt ("the same
 workload must be used for baseline, thread-count configurations...").
 Phase A used 15 documents deliberately to test model robustness across
 varied content; Phase B measures latency across configurations, which
-requires holding content constant so thread-count is the only variable
-that changes between runs.
+requires holding content constant so the tested parameter is the only
+variable that changes between runs.
 
 **Why doc_07**: it was selected as the closest match to Phase A's
 overall average, not a best- or worst-case document. Its Phase A score
 (4.00/5) sits 0.08 points from the 15-document mean (4.08/5) — the
 smallest gap of any PASS document — and its source length (~214
 tokens, verified via Prefill Turn measurement) is within the
-project's typical range, not at either extreme (`doc_04` and `doc_14`,
-both FAILs, were excluded from consideration on this basis alone; very
-short documents like `doc_10`/`doc_11`, both 5.0/5, were excluded as
-unrepresentatively favorable). A workload chosen for being typical,
-rather than a best or worst case, gives Phase B's latency comparisons
-the best chance of reflecting normal operating conditions rather than
-an edge case.
+project's typical range, not at either extreme.
 
 System prompt, output format, and `--max_output_tokens=400` are
 unchanged from MODEL_SELECTION_PROTOCOL.md — frozen alongside the
@@ -38,45 +32,115 @@ model per §11 of the master prompt.
 (`android_arm64` config). See RUNTIME_SELECTION.md for the full
 build/deployment record.
 
-## Confirmed flag combination (frozen)
+## Confirmed flag combination (frozen) — two-lever design
 
 ```
 LD_LIBRARY_PATH=/data/local/tmp
 --backend=cpu
 --max_output_tokens=400
 --benchmark=true
---num_cpu_threads=<N>   (varies per configuration, see below)
+--cache_dir=:memory
+--disable_weight_cache=false
+--num_cpu_threads=<N>   (varies per configuration for Lever 1; fixed at winning value for Lever 2)
 --model_path=/data/local/tmp/gemma-4-E2B-it.litertlm
---input_prompt_file=/data/local/tmp/<frozen doc_07 prompt file>
+--input_prompt_file=/data/local/tmp/phase_b_prompt.txt
 ```
 
-`--num_cpu_threads` is the only parameter that changes between
-configurations. All other flags are fixed across every run in Phase B.
+Both cache flags (`--cache_dir` and `--disable_weight_cache`) are set
+explicitly on every Phase B run, including Lever 1's thread-count
+sweep, rather than relying on either flag's documented default. This
+follows directly from an 11x Init Executor variance observed on the
+unset-flag "default" configuration during cache-lever testing
+(10,769ms vs 941ms across two otherwise-identical runs) — an
+unexplained, uncontrolled state dependency (almost certainly a stale
+on-disk compilation cache left by a prior run) that must not be
+allowed to silently vary during the thread-count comparison either.
 
 ## Backend / XNNPACK — already resolved, no separate lever
 
 Per RUNTIME_SELECTION.md, no independent XNNPACK toggle exists in this
 runtime — `--backend=cpu` is the only CPU execution path, and it uses
-XNNPACK internally. Consequently:
+XNNPACK internally. Consequently, the "XNNPACK experiment" and
+"combined" experiment described in §24-25 and §52 of the master prompt
+are not run as separate configurations in this project — there is no
+non-XNNPACK CPU baseline to compare against.
 
-- The "XNNPACK experiment" described in §24-25 of the master prompt is
-  **not run as a separate configuration** in this project. There is no
-  non-XNNPACK CPU baseline to compare against.
-- The "combined" experiment (§52 of the master prompt, thread-count +
-  XNNPACK) **collapses into the thread-count sweep itself** — since
-  XNNPACK is always active on the CPU backend, every thread-count
-  configuration already includes it.
-- This is stated explicitly here so it is not rediscovered mid-campaign:
-  Phase B has **one lever, not two** (thread-count), contrary to the
-  two-lever design originally set out in §17 of the master prompt. This
-  deviation is sourced directly from RUNTIME_SELECTION.md's empirical
-  verification, not a late scope change.
+## Two-lever design
+
+Two independent optimization levers are tested, in sequence, not as a
+full factorial design.
+
+### Lever 1: CPU thread-count (`--num_cpu_threads`)
+
+Baseline (auto), 1, 2, 4, 8 threads — see "Thread-count
+configurations" below. Run entirely under `--cache_dir=:memory
+--disable_weight_cache=false` (fixed), to isolate the thread-count
+effect from the cache-state variance described above.
+
+### Lever 2: Weight cache mode (`--cache_dir` / `--disable_weight_cache`)
+
+Tested only at the winning thread-count from Lever 1, not across all
+five thread-count values. Two configurations:
+
+- `--cache_dir=:memory --disable_weight_cache=false` (already measured
+  as part of Lever 1's winning configuration — not re-run)
+- `--disable_weight_cache=true` (new configuration)
+
+**Documented tradeoff**: this sequential design assumes no interaction
+effect between thread-count and cache setting — an assumption not
+formally tested by running the full 5x2 factorial grid, chosen to keep
+the campaign within the project's time budget. Partial mitigation: the
+winning and losing thread-count configurations from Lever 1 will each
+be spot-checked once under both cache settings (4 additional runs, not
+part of the 30-run valid sample) specifically to confirm the cache
+effect's direction and rough magnitude hold at both extremes before
+trusting the sequential result. A full factorial design remains a
+documented direction for future work if this spot-check suggests a
+real interaction.
+
+### Empirical basis for Lever 2 (pilot testing, 2 runs per setting)
+
+| Setting | Init Executor | Decode Speed |
+|---|---|---|
+| `--cache_dir=:memory` (run 1) | 4,981 ms | 13.71 tok/s |
+| `--cache_dir=:memory` (run 2) | 5,003 ms | 14.87 tok/s |
+| `--disable_weight_cache=true` (run 1) | 10,845 ms | 8.93 tok/s |
+| `--disable_weight_cache=true` (run 2) | 10,987 ms | 9.73 tok/s |
+
+Both settings were stable and reproducible across their 2 pilot runs
+(unlike the unset-flag "default," which was not — see above). The gap
+is large and consistent: roughly 54% faster Init Executor and ~40%
+faster decode with the weight cache active. The mechanism is not yet
+confirmed against the runtime's source code (only observed
+empirically) — this is noted as a limitation, not claimed as fully
+understood. Verifying the mechanism in `shared_flags.cc` /
+`llm_litert_lib.cc` is a documented follow-up before RESULTS.md is
+finalized.
+
+## Alternative levers considered and rejected (pilot testing)
+
+Three additional candidates were evaluated as a possible third lever
+and rejected, each on a "no demonstrated gain" basis:
+
+- **Speculative decoding** (`--enable_speculative_decoding`): functional
+  (confirmed via a deterministic 43.8% MTP Drafter success rate across
+  2 runs), but no measurable decode-speed improvement (14.47-14.51
+  tok/s with vs. 13.71-14.88 tok/s without — overlapping ranges).
+- **Local-attention ringbuffers**: flag does not exist on this binary
+  (`litert_lm_advanced_main --helpfull` returned no match for "ring"
+  or "attention") — likely a `pip`-CLI-only flag, not available here.
+- **Constant tensor sharing** (`--share_constant_tensors`): no
+  distinguishable effect (Init Executor 5,296ms vs 4,816ms, Decode
+  Speed 15.72 vs 15.01 tok/s — within normal run-to-run noise observed
+  elsewhere in this project).
+
+Full rationale for each: see OPTIMIZATION_PRE_SCREENING.md.
 
 ## Thread-count configurations
 
 Tensor G2 topology (confirmed in DEVICE_CHARACTERIZATION.md): 8 cores,
-heterogeneous 4× Cortex-A55 (cores 0-3) / 2× Cortex-A78 (cores 4-5) /
-2× Cortex-X1 (cores 6-7).
+heterogeneous 4x Cortex-A55 (cores 0-3) / 2x Cortex-A78 (cores 4-5) /
+2x Cortex-X1 (cores 6-7).
 
 Configurations to test:
 
@@ -109,11 +173,9 @@ reflect a mixture of the configured parameter and unobserved Android
 scheduler core-placement decisions (per §19, CPU affinity is out of
 scope — no attempt is made to control which cores execute which
 threads). This caveat must appear first in any RESULTS.md section
-presenting thread-count comparisons, per the master prompt's own
-§23-bis discipline established during planning. A robustness
-replication (best configuration re-run in a separate session) is
-required before any configuration is reported as final — see
-MEASUREMENT_PROCEDURE.md.
+presenting thread-count comparisons. A robustness replication (best
+configuration re-run in a separate session) is required before any
+configuration is reported as final — see MEASUREMENT_PROCEDURE.md.
 
 ## Charging state — resolved
 
@@ -121,28 +183,24 @@ Phase B measurements are taken with the device disconnected from USB
 power (wireless ADB), not while charging. Rationale: simultaneous
 charging and CPU-bound inference introduces an uncontrolled thermal
 confound (two independent heat sources) not present in normal
-standalone execution. This differs from Phase A, which ran while
-charging (a choice made for setup convenience, not deliberate control,
-per ISSUE_LOG.md).
+standalone execution.
 
-Battery floor raised from ≥20% to ≥50% specifically to limit
-within-campaign battery-level drift across the ~2.5-4h estimated
-campaign duration — configurations tested later in the campaign should
-not run under meaningfully different battery conditions than those
-tested first. If battery drops below 50% mid-campaign, pause and
-recharge before continuing; do not lower this threshold retroactively.
-
-"Charging state" is removed as a separate readiness-gate parameter —
-the gate becomes: thermal status (NONE/LIGHT) + battery ≥50%. Device
-is confirmed disconnected from USB power for the entire campaign, not
-checked per-run (it is a session-level condition, not a per-run one).
+Battery floor: ≥50%, raised from an initial 20% floor to limit
+within-campaign battery-level drift across the multi-hour estimated
+campaign duration. If battery drops below 50% mid-campaign, pause and
+recharge (device may charge between configurations, but not during a
+run) before continuing.
 
 ## Readiness gate thresholds
+
+Per the master prompt's resolved decision (§41), device temperature is
+measured exclusively via Android thermal status
+(`PowerManager.getCurrentThermalStatus()`), not raw °C.
 
 | Parameter | Accepted range | Rationale |
 |---|---|---|
 | Thermal status | NONE or LIGHT only | Phase A never observed MODERATE or above across 36 runs; MODERATE+ is treated as a stop condition, not a tested state |
-| Battery level | ≥ 50% | Raised from an initial 20% floor to limit within-campaign battery-level drift over the ~2.5-4h estimated campaign, given the device runs unplugged (see Charging state note above) |
+| Battery level | ≥ 50% | See "Charging state" above |
 
 A run may begin only when both parameters pass. Device disconnection
 from USB power is a session-level precondition confirmed once at
@@ -150,45 +208,40 @@ campaign start, not re-checked per run.
 
 ## Stabilization criterion
 
-Based on Phase A's observed decode speed variance on doc_07-length
-outputs (13.97–15.44 tokens/sec across repeated runs, a ~10% band):
+Based on Phase A/pilot observed decode speed variance on doc_07-length
+outputs (roughly 9-16 tokens/sec depending on configuration):
 
 - **Window size**: 5 consecutive runs.
 - **Tolerance**: stabilization is reached when the rolling median
   latency across the current 5-run window changes by less than 10%
   from the previous 5-run window's median.
 - This criterion is applied identically to every configuration before
-  its 30 valid measurement runs begin (§32-34 of the master prompt).
+  its 30 valid measurement runs begin.
+- A first stabilization attempt on baseline was discarded after a
+  ~4-hour gap broke run continuity and battery dropped below the
+  floor mid-attempt — see ISSUE_LOG.md. The window must be run without
+  major time gaps and while the battery-floor condition holds
+  throughout.
 
 ## Valid run count and time budget
 
-**Nominal target: 30 valid runs per configuration** (§35-36 of the
-master prompt), with the documented 20-run fallback available if the
-time budget calculation below does not hold in practice.
+**Nominal target: 30 valid runs per configuration**, with the
+documented 20-run fallback available if the time budget does not hold
+in practice.
 
-Time budget estimate, from Phase A's real measured timings on
-doc_07-length content:
-- Per-run latency (post-warm-up, cache warm): ~0.5s init + ~3s TTFT +
-  ~13s decode (200 tokens @ ~15 tok/s) ≈ **16-17s per run**.
-- 5 configurations (baseline + 4 thread counts) × 30 runs × ~17s ≈
-  **42.5 minutes of pure inference time**, before accounting for the
-  stabilization phase (5-10 extra runs per configuration) and recovery
-  intervals between batches.
-- With stabilization and recovery, total campaign time is estimated at
-  **2.5-4 hours**, feasible within the project's time budget without
-  invoking the 20-run fallback. This estimate will be confirmed
-  empirically with a pilot run before the full campaign begins (see
-  MEASUREMENT_PROCEDURE.md).
+Revised time estimate from pilot/pre-campaign runs: per-run latency
+ranges roughly 15-20s under the `:memory` cache setting (cache-disabled
+runs are slower, ~25-30s). With 5 Lever-1 configurations x 30 runs,
+plus stabilization and recovery, plus 1 new Lever-2 configuration x 30
+runs, plus the 4-run interaction spot-check, plus the 10-run robustness
+replication, total campaign time is estimated in the range of several
+hours. This will be confirmed empirically with a pilot run before the
+full campaign begins.
 
 ## Recovery interval
 
 A minimum of 60 seconds between measurement batches (per configuration
-change), before the readiness gate is re-checked. This is a starting
-value, not empirically derived from Phase A (Phase A's device-state
-logs do not include recovery-interval data, since Phase A did not use
-the strict Phase B gate) — to be adjusted if the pilot run shows
-thermal status frequently failing to return to NONE/LIGHT within this
-window.
+change), before the readiness gate is re-checked.
 
 ## Frozen input file — canonical reference
 
@@ -196,14 +249,8 @@ window.
 `/data/local/tmp/`) is the exact, unchanging input for every Phase B
 run. Canonical reference:
 - Size: 2163 bytes
-- SHA256: 7edcb8370dfb3b31b90e148b579dabcc488da9eb61b53838a1c2703212e4e606
+- SHA256: `7edcb8370dfb3b31b90e148b579dabcc488da9eb61b53838a1c2703212e4e606`
 
-This file's Prefill Turn token count (447, confirmed via a verified
-run) is the Phase B baseline reference -- it is not required to match
-Phase A's doc_07 prefill count (464), since Phase A's exact historical
-file could not be byte-verified retroactively. Phase B's internal
-consistency (same file across all configurations) is what matters for
-valid relative comparisons, not parity with a prior phase's number.
-Before every future measurement, verify `sha256sum` on-device matches
-the value above -- do not regenerate this file at any point during
-the campaign.
+Before every measurement session, verify `sha256sum` on-device matches
+the value above — do not regenerate this file at any point during the
+campaign.
