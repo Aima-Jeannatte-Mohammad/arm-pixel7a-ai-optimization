@@ -25,6 +25,12 @@ not a high-precision profiler. CPU utilization is reported as raw
 percent of one core (may exceed 100% when multiple threads are
 active, up to ~800% on this 8-core device) -- this is the standard
 "top"-style convention, not normalized per core.
+
+adb-level failures (e.g. "more than one device/emulator", device
+disconnected) raise AdbError immediately and abort the run -- they are
+never silently treated as "device not ready", which previously caused
+the script to loop indefinitely without making progress or surfacing
+the real problem.
 """
 
 import argparse
@@ -58,11 +64,36 @@ FIELDNAMES = [
 ]
 
 
+class AdbError(RuntimeError):
+    """Raised when adb itself fails (not a device-readiness condition).
+    Examples: multiple devices attached and ambiguous, device offline,
+    adb daemon unreachable. Never treated as 'not ready' -- these mean
+    the script cannot talk to the device at all and must stop, not
+    retry silently."""
+
+
 def adb_shell(cmd, timeout=60):
-    """Run a single adb shell command, return stdout as string."""
+    """Run a single adb shell command, return stdout as string.
+    Raises AdbError if adb itself fails (nonzero exit, or a stderr
+    message indicating an adb-level problem rather than a normal
+    command result)."""
     result = subprocess.run(
         ["adb", "shell", cmd], capture_output=True, text=True, timeout=timeout, check=False
     )
+    stderr = (result.stderr or "").strip()
+    adb_error_markers = (
+        "more than one device/emulator",
+        "device offline",
+        "device not found",
+        "no devices/emulators found",
+        "error: no devices",
+    )
+    if result.returncode != 0 and any(marker in stderr.lower() for marker in adb_error_markers):
+        raise AdbError(
+            f"adb shell failed (adb-level error, not a device-readiness issue): "
+            f"{stderr!r} -- check `adb devices` for a duplicate/ambiguous connection "
+            f"before retrying."
+        )
     return result.stdout
 
 
@@ -89,13 +120,23 @@ def get_clk_tck():
 def readiness_gate():
     """Block until thermal status and battery both pass. Returns
     (thermal_status, battery_pct) once GREEN LIGHT. Raises TimeoutError
-    if the gate does not pass within READINESS_MAX_WAIT_S."""
+    if the gate does not pass within READINESS_MAX_WAIT_S. Raises
+    AdbError immediately (not retried) if adb itself is unreachable or
+    ambiguous -- this is a hard stop, not a readiness condition."""
     waited = 0
     while True:
         thermal = get_thermal_status()
         battery = get_battery_level()
+        if thermal is None or battery is None:
+            raise AdbError(
+                f"Could not read device state (thermal={thermal!r}, "
+                f"battery={battery!r}) despite adb_shell succeeding -- "
+                f"this indicates dumpsys output could not be parsed, not "
+                f"a normal 'not ready' state. Check the device manually "
+                f"before retrying."
+            )
         ok_thermal = thermal in THERMAL_OK
-        ok_battery = battery is not None and battery >= BATTERY_MIN
+        ok_battery = battery >= BATTERY_MIN
         if ok_thermal and ok_battery:
             return thermal, battery
         print(
@@ -161,20 +202,16 @@ def parse_benchmark_info(text):
     }
 
 
-def run_one(threads, tick_rate):
+def run_one(threads, tick_rate, cache_dir=":memory", disable_weight_cache=False):
     """Launch the binary in the background on-device, poll it until
     completion, and return (metrics_dict, raw_log_text)."""
     threads_flag = f"--num_cpu_threads={threads} " if threads is not None else ""
-    # `exec` replaces the backgrounded shell's own process image with the
-    # binary, so `$!` captures the real litert_lm_advanced_main PID
-    # directly -- without it, `$!` captures an intermediate `sh` wrapper
-    # PID that may exit before the binary does, breaking /proc polling.
-    # Confirmed empirically on-device: `ps -A | grep litert` showed the
-    # binary's own PID only once `exec` was added to the launch command.
+    cache_flag = f"--cache_dir={cache_dir} " if cache_dir else ""
+    dwc_flag = f"--disable_weight_cache={'true' if disable_weight_cache else 'false'} "
     launch_cmd = (
         f"cd {BINARY_DIR} && LD_LIBRARY_PATH={BINARY_DIR} exec "
         f"./litert_lm_advanced_main --backend=cpu --max_output_tokens=400 "
-        f"--benchmark=true {threads_flag}--model_path={MODEL} "
+        f"--benchmark=true {cache_flag}{dwc_flag}{threads_flag}--model_path={MODEL} "
         f"--input_prompt_file={PROMPT_FILE} "
         f"> {REMOTE_OUTPUT} 2>&1 & echo $!"
     )
@@ -237,6 +274,10 @@ def main():
                          help="Configuration name, e.g. baseline, threads_4")
     parser.add_argument("--threads", type=int, default=None,
                          help="--num_cpu_threads value; omit for baseline/auto")
+    parser.add_argument("--cache-dir", default=":memory",
+                         help="--cache_dir value (default: :memory, per OPTIMIZATION_PARAMETERS.md Lever 1)")
+    parser.add_argument("--disable-weight-cache", action="store_true",
+                         help="Pass --disable_weight_cache=true (Lever 2 configuration)")
     parser.add_argument("--n-runs", type=int, required=True,
                          help="Number of runs to perform in this invocation")
     parser.add_argument("--output", required=True,
@@ -245,7 +286,12 @@ def main():
                          help="Tag for this batch (warmup rows are excluded from stats)")
     args = parser.parse_args()
 
-    tick_rate = get_clk_tck()
+    try:
+        tick_rate = get_clk_tck()
+    except AdbError as exc:
+        print(f"\nFATAL: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not output_path.exists()
@@ -257,16 +303,34 @@ def main():
 
         for i in range(1, args.n_runs + 1):
             print(f"\n=== {args.config} | run {i}/{args.n_runs} ({args.run_type}) ===")
-            thermal_start, battery_start = readiness_gate()
+            try:
+                thermal_start, battery_start = readiness_gate()
+            except AdbError as exc:
+                print(f"\nFATAL: {exc}", file=sys.stderr)
+                print(f"Aborting after {i - 1}/{args.n_runs} completed run(s). "
+                      f"Fix the adb connection and re-run for the remaining runs.",
+                      file=sys.stderr)
+                sys.exit(1)
+
             print(f"  [readiness] GREEN LIGHT (thermal={thermal_start}, battery={battery_start}%)")
 
             validity = "valid"
             exclusion_reason = ""
             try:
-                metrics, _log_text = run_one(args.threads, tick_rate)
+                metrics, _log_text = run_one(
+                    args.threads, tick_rate,
+                    cache_dir=args.cache_dir,
+                    disable_weight_cache=args.disable_weight_cache,
+                )
                 if metrics.get("decode_tokens") is None:
                     validity = "invalid"
                     exclusion_reason = "failed_to_parse_benchmark_info"
+            except AdbError as exc:
+                print(f"\nFATAL: {exc}", file=sys.stderr)
+                print(f"Aborting after {i - 1}/{args.n_runs} completed run(s). "
+                      f"Fix the adb connection and re-run for the remaining runs.",
+                      file=sys.stderr)
+                sys.exit(1)
             except Exception as exc:  # noqa: BLE001 -- log and continue campaign
                 metrics = {}
                 validity = "invalid"
